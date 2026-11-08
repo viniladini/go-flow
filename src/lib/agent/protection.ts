@@ -13,12 +13,11 @@ export async function protectAgent(request: Request) {
     const ip = request.headers.get("x-real-ip");
     if (!ip) throw new Error("ip");
     const headers = new Headers({ host, "x-real-ip": ip });
-    for (const [id, rateLimitKey] of [["goflow-agent-global", "all-demo-executions"], ["goflow-agent-ip", ip]]) {
-      const result = await checkRateLimit(id, { headers, rateLimitKey, timeout: 1500 });
-      if (result.error === "not-found") throw new Error("rule");
-      if (result.rateLimited || result.error === "blocked") throw new AgentError("RATE_LIMIT", "Limite público de solicitações atingido. Tente novamente mais tarde.", 429);
-      if (result.error || result.rateLimited !== false) throw new Error("firewall");
-    }
+    // Reuse the existing ID for Hobby's single rule; the bucket is per platform IP.
+    const result = await checkRateLimit("goflow-agent-global", { headers, rateLimitKey: ip, timeout: 1500 });
+    if (result.error === "not-found") throw new Error("rule");
+    if (result.rateLimited === true || result.error === "blocked") throw new AgentError("RATE_LIMIT", "Limite público de solicitações atingido. Tente novamente mais tarde.", 429);
+    if (result.error || result.rateLimited !== false) throw new Error("firewall");
   } catch (error) {
     if (error instanceof AgentError) throw error;
     throw new AgentError("PROTECTION_UNAVAILABLE", "Proteção da IA pública indisponível. Nenhuma chamada à IA foi iniciada.", 503);

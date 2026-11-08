@@ -3,6 +3,8 @@ import { checkRateLimit } from "@vercel/firewall";
 import { protectAgent } from "@/lib/agent/protection";
 import { signAction, verifyAction, visitor } from "@/lib/agent/receipts";
 import { agentReceipt } from "../fixtures/agent";
+import { createAgentHandlers } from "@/lib/agent/server";
+import { randomUUID } from "node:crypto";
 vi.mock("server-only", () => ({}));
 vi.mock("@vercel/firewall", () => ({ checkRateLimit: vi.fn() }));
 const check = vi.mocked(checkRateLimit);
@@ -14,15 +16,27 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.resetAllMocks(); });
 describe("protecao publica fail-closed", () => {
-  it("consulta limites compartilhados global e por IP sem encaminhar cookies", async () => {
+  it("consulta somente a regra Hobby por IP sem encaminhar headers arbitrarios", async () => {
     await protectAgent(request());
-    expect(check).toHaveBeenCalledTimes(2);
-    expect(check.mock.calls.map(([id]) => id)).toEqual(["goflow-agent-global", "goflow-agent-ip"]);
+    expect(check).toHaveBeenCalledTimes(1);
+    expect(check.mock.calls[0][0]).toBe("goflow-agent-global");
     const options = check.mock.calls[0][1]!;
-    expect(options.rateLimitKey).toBe("all-demo-executions");
+    expect(options.rateLimitKey).toBe("192.0.2.1");
     expect((options.headers as Headers).get("host")).toBe("fixture.vercel.app");
     expect((options.headers as Headers).get("cookie")).toBeNull();
+    expect(options.headers).toBeInstanceOf(Headers);
+    expect([...(options.headers as Headers).entries()]).toEqual([["host", "fixture.vercel.app"], ["x-real-ip", "192.0.2.1"]]);
     expect(options.timeout).toBe(1500);
+  });
+  it("usa buckets distintos para IPs distintos, sem depender de cookies", async () => {
+    await protectAgent(request());
+    await protectAgent(new Request(request(), { headers: { "x-real-ip": "2001:db8::1", "x-forwarded-for": "192.0.2.1", "x-vercel-rate-limit-key": "caller-key", cookie: "visitor=caller-value" } }));
+    expect(check.mock.calls.map(([, options]) => options?.rateLimitKey)).toEqual(["192.0.2.1", "2001:db8::1"]);
+    expect([...(check.mock.calls[1][1]?.headers as Headers).keys()]).toEqual(["host", "x-real-ip"]);
+  });
+  it("IP ausente bloqueia sem usar chave global ou fornecida pelo cliente", async () => {
+    await expect(protectAgent(new Request(request(), { headers: { "x-forwarded-for": "192.0.2.1", "x-vercel-rate-limit-key": "caller-key" } }))).rejects.toMatchObject({ status: 503 });
+    expect(check).not.toHaveBeenCalled();
   });
   it.each([{ rateLimited: true }, { rateLimited: true, error: "blocked" as const }])("limite da plataforma retorna 429", async (result) => {
     check.mockResolvedValue(result);
@@ -40,9 +54,31 @@ describe("protecao publica fail-closed", () => {
     vi.stubEnv(name, ""); await expect(protectAgent(request())).rejects.toMatchObject({ status: 503 });
     expect(check).not.toHaveBeenCalled();
   });
-  it("regiao adicional nao pode multiplicar o limite global", async () => {
+  it("regiao adicional nao pode multiplicar o limite por IP", async () => {
     vi.stubEnv("VERCEL_REGION", "other1");
     await expect(protectAgent(request())).rejects.toMatchObject({ status: 503 });
+  });
+  it.each([{}, { rateLimited: "false" }, { rateLimited: false, error: "unexpected" }, null])("resposta inconclusiva do firewall bloqueia: %j", async (result) => {
+    check.mockResolvedValue(result as Awaited<ReturnType<typeof checkRateLimit>>);
+    await expect(protectAgent(request())).rejects.toMatchObject({ code: "PROTECTION_UNAVAILABLE", status: 503 });
+  });
+  it.each(["missing", "timeout", "limited"])("endpoint nao cria cliente Groq nem proposta quando firewall retorna %s", async (failure) => {
+    if (failure === "timeout") check.mockRejectedValue(new Error("private detail"));
+    else check.mockResolvedValue(failure === "missing" ? { rateLimited: false, error: "not-found" } : { rateLimited: true });
+    const client = vi.fn();
+    const handlers = createAgentHandlers({ config: () => ({ apiKey: "fixture-key", model: "fixture-model" }), client });
+    const response = await handlers.POST(new Request(request(), {
+      method: "POST",
+      headers: { origin: "https://fixture.vercel.app", "content-type": "application/json", "x-real-ip": "192.0.2.1" },
+      body: JSON.stringify({ source: "demo", requestId: randomUUID(), prompt: "Planeje compras da demo" }),
+    }));
+    expect(response.status).toBe(failure === "limited" ? 429 : 503);
+    const body = await response.json();
+    expect(body.action).toBeUndefined();
+    expect(body.reviewToken).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain("private detail");
+    expect(client).not.toHaveBeenCalled();
+    expect(check).toHaveBeenCalledTimes(1);
   });
   it("desenvolvimento local nao depende da Vercel", async () => {
     vi.stubEnv("NODE_ENV", "development"); vi.stubEnv("VERCEL", "");

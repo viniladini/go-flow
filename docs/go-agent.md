@@ -84,19 +84,29 @@ processo são apenas proteções locais suplementares, sem garantia entre instâ
 ### Proteção obrigatória na Vercel
 
 Em produção o servidor exige Vercel, região iad1 (fixada em vercel.json), hostname
-da plataforma e regras publicadas do SDK oficial @vercel/firewall:
-- `goflow-agent-global`: chave fixa para todas as execuções; configurar, por exemplo,
-  trinta solicitações por minuto com bloqueio, sem condições adicionais de bypass.
-- `goflow-agent-ip`: por IP fornecido pela plataforma; configurar dez por minuto.
+da plataforma e uma única regra publicada do SDK oficial @vercel/firewall,
+compatível com o plano Hobby:
+- Rate Limit ID: `goflow-agent-global` (mantido para reutilizar a regra existente).
+- Chave: IP do visitante fornecido pela Vercel em `x-real-ip`, passado explicitamente
+  como `rateLimitKey`; apesar do nome histórico, o bucket agora é por IP.
+- Configuração conservadora no painel: dez solicitações por sessenta segundos,
+  Fixed Window e ação de bloqueio/429, sem condições adicionais de bypass.
+  Ajustar a regra existente de 30/60 para 10/60; o SDK não configura esse valor.
+  Não é necessário criar nem consultar `goflow-agent-ip`.
 
 Esses valores são limites públicos de proteção, não parâmetros operacionais.
 Cada verificação tem timeout de 1,5 segundo. Regra ausente, erro, timeout, plataforma
-ou região inesperada bloqueiam a IA com 503 antes do SDK Groq; limite retorna 429.
+ou região inesperada, IP ausente ou resposta inconclusiva bloqueiam a IA com 503
+antes do SDK Groq; limite retorna 429. Apenas host validado e IP da plataforma são
+encaminhados; cookies e chaves arbitrárias do cliente não definem o bucket.
 Nenhum booleano de ambiente habilita bypass de produção. Desenvolvimento local
 continua funcional com proteção local; `next start` fora da Vercel bloqueia a IA.
 
 Os contadores WAF são regionais, não um limite mundial de gastos. Manter a região
-única e validar as duas regras no ambiente de avaliação antes de publicar. Configurar
+única e validar a regra no ambiente de avaliação antes de publicar. IP compartilhado
+(NAT/proxy) divide o mesmo bucket; troca de IP permite outro bucket. Não há um
+limite agregado entre visitantes, nem identidade autenticada por pessoa. Não foi
+adicionado contador em memória como substituto do WAF. Configurar
 também limites de consumo na conta Groq. Regras apenas em log/não ativas não provam
 proteção: teste efetivo de 429 é requisito de release. A configuração externa não
 foi realizada automaticamente nesta auditoria.
