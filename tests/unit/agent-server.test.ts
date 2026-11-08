@@ -15,7 +15,7 @@ function completion(tool = true, argumentsText = JSON.stringify(args), name = AG
       message: { role: "assistant", content: tool ? null : "Compre 999999 unidades por R$ 0,01; este texto não deve ser apresentado.",
         ...(tool ? { tool_calls: [{ id: "call_fixture", type: "function", function: { name, arguments: argumentsText } }] } : {}) } }] };
 }
-function setup(responses: (ReturnType<typeof completion> | Response | Error)[] = [completion(), completion(false)]) {
+function setup(responses: (ReturnType<typeof completion> | Response | Error)[] = [completion(), completion(false)], configuredModel = model) {
   const bodies: Record<string, unknown>[] = [];
   const fetchMock = vi.fn(async (_url: unknown, init: RequestInit | undefined) => {
     bodies.push(JSON.parse(String(init?.body)));
@@ -24,7 +24,7 @@ function setup(responses: (ReturnType<typeof completion> | Response | Error)[] =
     return result instanceof Response ? result : new Response(JSON.stringify(result), { status: 200, headers: { "content-type": "application/json" } });
   });
   const client = new Groq({ apiKey: key, baseURL: "https://api.groq.com", maxRetries: 0, timeout: 1000, logLevel: "off", fetch: fetchMock });
-  const config = vi.fn(() => ({ apiKey: key, model }));
+  const config = vi.fn(() => ({ apiKey: key, model: configuredModel }));
   const handlers = createAgentHandlers({ config, client: () => client });
   return { handlers, fetchMock, bodies, config };
 }
@@ -35,6 +35,29 @@ function request(body: unknown, method = "POST", origin = "http://localhost:3000
 beforeEach(() => { vi.spyOn(console, "warn").mockImplementation(() => {}); });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 describe("orquestração real via SDK oficial com API mockada", () => {
+  it("payload serializado do GPT-OSS 20B preserva tool calling sem modos incompativeis", async () => {
+    const { handlers, bodies, fetchMock } = setup(undefined, "openai/gpt-oss-20b");
+    const result = await handlers.POST(request(input()));
+    expect(result.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const body of bodies) {
+      expect(body).toMatchObject({ model: "openai/gpt-oss-20b", parallel_tool_calls: false, reasoning_effort: "low", store: false });
+      expect(body).not.toHaveProperty("reasoning_format");
+      expect(body).not.toHaveProperty("response_format");
+      expect(body).not.toHaveProperty("disable_tool_validation");
+      expect(body.tools).toEqual([expect.objectContaining({ type: "function", function: expect.objectContaining({
+        name: AGENT_TOOL,
+        parameters: expect.objectContaining({ type: "object", additionalProperties: false, required: ["budgetCents", "skuCodes"], properties: expect.objectContaining({
+          budgetCents: expect.objectContaining({ type: "integer" }), skuCodes: expect.objectContaining({ type: "array", items: { type: "string" } }),
+        }) }),
+      }) })]);
+    }
+    expect(bodies[0].tool_choice).toEqual({ type: "function", function: { name: AGENT_TOOL } });
+    expect(bodies[1].tool_choice).toBe("none");
+    const receipt = await result.json() as AgentReceipt;
+    expect(receipt.action.tool.name).toBe(AGENT_TOOL);
+    expect((await handlers.PATCH(request({ source: "demo", id: receipt.action.id, reviewToken: receipt.reviewToken, decision: "approve" }, "PATCH"))).status).toBe(200);
+  });
   it("chama a ferramenta, calcula, confirma, registra e permite revisão validada", async () => {
     const { handlers, fetchMock, bodies } = setup();
     const response = await handlers.POST(request(input()));
@@ -115,6 +138,24 @@ describe("orquestração real via SDK oficial com API mockada", () => {
 });
 describe("barreiras de privacidade e erros do servidor", () => {
   it.each([
+    [{ error: { code: "unsupported_parameter", type: "invalid_request_error", param: "parallel_tool_calls" } }, { code: "unsupported_parameter", type: "invalid_request_error", param: "parallel_tool_calls" }],
+    [{ error: { code: "tool_use_failed", type: "invalid_request_error", param: null } }, { code: "tool_use_failed", type: "invalid_request_error", param: null }],
+    [{ code: "invalid_value", type: "validation_error", param: "tool_choice" }, { code: "invalid_value", type: "validation_error", param: "tool_choice" }],
+    [{ error: { code: "fixture-private", type: "fixture-private", param: "messages.fixture-private" } }, { code: "redacted", type: "redacted", param: "redacted" }],
+    [{ error: { code: { private: "fixture-private" }, type: ["fixture-private"], param: "x".repeat(10000) } }, { code: "redacted", type: "redacted", param: "redacted" }],
+  ])("diagnostica campos estruturados do 400 por allowlist, sem mensagens brutas", async (errorBody, providerError) => {
+    const body = { ...errorBody, message: key + " fixture-private", failed_generation: "fixture-private" };
+    const { handlers } = setup([new Response(JSON.stringify(body), { status: 400 })]);
+    const result = await handlers.POST(request(input({ prompt: "fixture-private" })));
+    expect(result.status).toBe(503);
+    const responseBody = await result.json();
+    expect(responseBody.action).toBeUndefined(); expect(responseBody.reviewToken).toBeUndefined();
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ event: "agent_groq", reason: "model_or_parameters_incompatible", upstreamStatus: 400, providerError }));
+    const emitted = JSON.stringify(vi.mocked(console.warn).mock.calls) + JSON.stringify(responseBody);
+    expect(emitted).not.toContain("fixture-private"); expect(emitted).not.toContain(key);
+    expect(emitted).not.toContain("failed_generation");
+  });
+  it.each([
     [401, "authentication_or_permission"], [403, "authentication_or_permission"],
     [400, "model_or_parameters_incompatible"], [422, "model_or_parameters_incompatible"],
     [404, "model_or_resource_not_found"], [429, "provider_rate_limit"],
@@ -128,7 +169,7 @@ describe("barreiras de privacidade e erros do servidor", () => {
     expect(result.status).toBe(status === 429 ? 429 : 503);
     const body = await result.json();
     expect(body.action).toBeUndefined(); expect(body.reviewToken).toBeUndefined();
-    expect(console.warn).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ event: "agent_groq", reason, upstreamStatus: status }));
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ event: "agent_groq", reason, upstreamStatus: status, ...(status === 400 ? { providerError: { code: "redacted" } } : {}) }));
     expect(JSON.stringify(vi.mocked(console.warn).mock.calls) + JSON.stringify(body)).not.toContain(marker);
     expect(JSON.stringify(vi.mocked(console.warn).mock.calls) + JSON.stringify(body)).not.toContain(key);
   });
