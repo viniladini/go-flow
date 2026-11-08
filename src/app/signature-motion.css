@@ -1,0 +1,224 @@
+/* Presentation-only canvases. Operational themes and legacy brand tokens stay intact. */
+#goflow-presentation { --scene-duration: var(--motion-editorial); isolation: isolate; }
+#goflow-presentation[data-palette] { transition: none; }
+#goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"]) { background: var(--scene-background); color: var(--scene-ink); }
+#goflow-presentation .cinematic-stage { position: fixed; inset: 0; z-index: 1; overflow: hidden; }
+#goflow-presentation .cinematic-stage > .presentation-scene {
+  position: absolute; inset: 0; width: 100%; max-width: none; height: 100%; margin: 0;
+  padding: max(130px, 17dvh) clamp(20px, 4vw, 56px) max(112px, 13dvh);
+  display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--scene-background); color: var(--scene-ink); z-index: 2;
+  animation: signature-return var(--scene-duration) var(--ease-editorial) both;
+}
+#goflow-presentation .scene-content { position: relative; width: 100%; max-width: 1120px; margin: auto; flex: 0 0 auto; }
+#goflow-presentation .cinematic-stage > .presentation-scene.outgoing { z-index: 1; pointer-events: none; animation: none; }
+#goflow-presentation .outgoing .scene-content { animation: signature-ink-out 580ms var(--ease-exit) both; }
+/* Keep heading ink separate: :is() takes the specificity of its strongest arm. */
+#goflow-presentation .cinematic-stage > .presentation-scene :is(p, mark, strong, .agent-title-accent, .handoff-wordmark) { color: var(--scene-ink); text-shadow: none; }
+#goflow-presentation .cinematic-stage > .presentation-scene h1 { color: var(--scene-title); text-shadow: none; transition: none; max-width: 1000px; }
+#goflow-presentation .cinematic-stage > .presentation-scene mark { background: none; color: var(--scene-accent); text-decoration: none; }
+#goflow-presentation .cinematic-stage .presentation-description { max-width: 640px; font-size: clamp(15px, 1.5vw, 19px); line-height: 1.7; opacity: 1; }
+#goflow-presentation .presentation-scene[data-scene="0"] h1 { font-size: clamp(104px, 15vw, 200px); }
+#goflow-presentation .presentation-scene[data-scene="1"] h1 { font-size: clamp(52px, 7.3vw, 100px); max-width: 920px; }
+#goflow-presentation .signature-word { display: block; overflow: clip; line-height: 1.12; }
+#goflow-presentation .signature-word:nth-child(2) { padding-left: 5%; }
+#goflow-presentation .signature-word:nth-child(3) { padding-left: 10%; color: var(--scene-accent); }
+#goflow-presentation .signature-word > span { display: inline-block; }
+#goflow-presentation .presentation-scene[data-scene="2"] h1 { font-size: clamp(44px, 6.6vw, 88px); max-width: 820px; }
+#goflow-presentation .presentation-scene[data-scene="3"] h1 { font-size: clamp(44px, 5.7vw, 78px); max-width: 67%; }
+#goflow-presentation .presentation-scene[data-scene="3"] .presentation-description { max-width: 60%; }
+#goflow-presentation .presentation-scene[data-scene="4"] h1 { font-size: clamp(42px, 5.5vw, 76px); }
+#goflow-presentation .signature-chain { display: flex; flex-wrap: wrap; gap: 18px; list-style: none; margin-top: 32px; padding: 0; font: 600 clamp(15px, 2vw, 24px)/1.5 var(--font-jakarta), sans-serif; color: var(--scene-ink); }
+.signature-chain li + li::before { content: "→"; margin-right: 18px; color: var(--scene-accent); }
+#goflow-presentation .presentation-orb { position: absolute; inset: 5% 0 auto auto; width: clamp(170px, 25vw, 290px); height: auto; }
+#goflow-presentation .presentation-orb .flow-orb { width: 100%; height: auto; animation: none; }
+#goflow-presentation .presentation-agent { max-width: 65%; font-size: 13px; }
+#goflow-presentation .presentation-agent svg { flex-shrink: 0; color: var(--scene-accent); }
+#goflow-presentation :is(.presentation-curves, .cinematic-surface, .cinematic-guide) { display: none; }
+/* A persistent curve changes composition, not identity, between scenes. Decorative only. */
+#goflow-presentation .signature-connector { position: fixed; right: -5%; bottom: 5%; width: min(36vw, 460px); height: min(50vh, 460px); z-index: 3; pointer-events: none; color: var(--scene-accent); transform: translate(4%, 8%) rotate(-8deg); transition: transform var(--motion-editorial) var(--ease-editorial); opacity: .22; }
+.signature-connector path { stroke: currentColor; stroke-width: 2; }
+.signature-connector circle { fill: currentColor; }
+#goflow-presentation[data-scene="1"] .signature-connector { transform: translate(-12%, -8%) rotate(8deg); }
+#goflow-presentation[data-scene="2"] .signature-connector { transform: translate(0, 0); }
+#goflow-presentation[data-scene="3"] .signature-connector { transform: translate(-4%, -18%) scale(.8); }
+#goflow-presentation[data-scene="4"] .signature-connector { transform: translate(8%, 12%) scale(1.2); }
+#goflow-presentation[data-mode="splash"] .signature-connector { display: none; }
+/* Controls carry a local opaque surface, so their contrast cannot cross an unsafe tween. */
+#goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"]) :is(.presentation-header, .presentation-footer, .presentation-slogan) { z-index: 10; color: var(--scene-ink); }
+#goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"]) :is(.scene-caption, .scene-dots, .presentation-footer, .presentation-slogan > span) { background: var(--scene-background); color: var(--scene-ink); border-radius: 8px; }
+#goflow-presentation .scene-caption { padding: 6px 8px; margin-left: -8px; }
+#goflow-presentation .scene-dots { padding: 8px; }
+#goflow-presentation .scene-dots li { background: transparent; border: 1px solid var(--scene-ink); opacity: 1; }
+#goflow-presentation .scene-dots li[aria-current="step"] { background: var(--scene-ink); }
+#goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"]) :is(.presentation-skip, .presentation-footer button, .scene-chrome-arrow) { background: var(--scene-background); color: var(--scene-ink); border: 1px solid var(--scene-ink); transition: transform var(--motion-instant), box-shadow var(--motion-quick); }
+#goflow-presentation .presentation-footer { margin-top: auto; padding-top: 10px; padding-bottom: 4px; }
+/* The notice travels with its scene's mask, outside the content's exit fade.
+   The original slot still reserves its layout; controls remain live above it. */
+#goflow-presentation .presentation-scene-notice {
+  position: fixed; left: var(--notice-bar-x, 0px); top: var(--notice-bar-y, 0px);
+  width: var(--notice-bar-width, 0px); height: var(--notice-bar-height, 0px);
+  background: var(--scene-background); color: var(--scene-ink); border-color: var(--scene-ink);
+  border-radius: 8px; font: var(--notice-font, 10px var(--font-inter), sans-serif);
+  letter-spacing: var(--notice-letter-spacing, normal); text-align: var(--notice-text-align, start);
+  visibility: hidden; pointer-events: none; animation: none; transition: none;
+}
+#goflow-presentation .presentation-scene-notice > span {
+  position: absolute; left: var(--notice-copy-x, 0px); top: var(--notice-copy-y, 0px);
+  width: var(--notice-copy-width, auto); height: var(--notice-copy-height, auto);
+}
+#goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"])[data-palette] .presentation-scene-notice { visibility: visible; }
+#goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"])[data-palette] .presentation-footer { background: transparent; }
+#goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"])[data-palette] .presentation-footer > [data-notice-anchor] { visibility: hidden; }
+#goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"])[data-palette] .presentation-footer nav { background: var(--scene-background); border-radius: 8px; }
+#goflow-presentation .presentation-slogan { position: relative; width: fit-content; pointer-events: none; }
+#goflow-presentation .presentation-slogan > span { padding: 4px 8px; }
+/* One live control plane; paint-only chrome belongs to each scene's reveal mask. */
+#goflow-presentation .scene-chrome { visibility: hidden; pointer-events: none; }
+#goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"])[data-palette] .scene-chrome { visibility: visible; }
+#goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"])[data-palette] [data-chrome-anchor] { opacity: 0; }
+#goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"])[data-palette] [data-chrome-anchor] button { transform: none; }
+#goflow-presentation .scene-chrome-header {
+  position: fixed; left: var(--chrome-header-x, 0px); top: var(--chrome-header-y, 0px);
+  width: var(--chrome-header-width, 0px); height: var(--chrome-header-height, 0px); margin: 0;
+}
+#goflow-presentation .scene-chrome-slogan {
+  position: fixed; left: var(--chrome-slogan-x, 0px); top: var(--chrome-slogan-y, 0px);
+  width: var(--chrome-slogan-width, 0px); height: var(--chrome-slogan-height, 0px); margin: 0;
+}
+#goflow-presentation .scene-chrome-slogan > span { transform: var(--chrome-slogan-transform, none); transition: none; }
+#goflow-presentation .scene-chrome-navigation {
+  position: absolute; top: var(--chrome-nav-top, 0px); right: var(--chrome-nav-right, 0px);
+  display: flex; align-items: center; gap: var(--chrome-nav-gap, 20px);
+}
+#goflow-presentation .scene-chrome-arrow {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  min-height: 44px; padding: 10px 14px; border-radius: var(--radius-control); font-size: 13px;
+}
+#goflow-presentation .scene-chrome-arrow[data-disabled] { opacity: .45; }
+#goflow-presentation:has([data-chrome-anchor="header"] .presentation-skip:focus-visible) .scene-chrome-skip,
+#goflow-presentation:has([data-chrome-anchor="navigation"] button[aria-label="Voltar"]:focus-visible) .scene-chrome-back,
+#goflow-presentation:has([data-chrome-anchor="navigation"] .scene-next:focus-visible) .scene-chrome-next { outline: 3px solid var(--scene-ink); outline-offset: 5px; }
+#goflow-presentation:has([data-chrome-anchor="header"] .presentation-skip:enabled:active) .scene-chrome-skip,
+#goflow-presentation:has([data-chrome-anchor="navigation"] button[aria-label="Voltar"]:enabled:active) .scene-chrome-back,
+#goflow-presentation:has([data-chrome-anchor="navigation"] .scene-next:enabled:active) .scene-chrome-next { transform: translateY(1px) scale(.985); }
+#goflow-presentation .presentation-choices { margin-top: 28px; gap: 16px; }
+#goflow-presentation .presentation-choice { background: var(--scene-button); color: var(--scene-buttonInk); border: 1px solid var(--scene-button); border-radius: var(--radius-card); transition: transform var(--motion-quick) var(--ease-settle), box-shadow var(--motion-quick); }
+#goflow-presentation .presentation-choice:nth-child(2) { background: var(--scene-background); color: var(--scene-ink); border-color: var(--scene-ink); }
+#goflow-presentation .presentation-choice :is(strong, span, svg) { color: inherit !important; }
+#goflow-presentation .presentation-choice > span { line-height: 1.7; }
+#goflow-presentation .handoff-wordmark { margin-bottom: 20px; }
+#goflow-presentation .handoff-wordmark .splash-dot { color: var(--brand-chartreuse); }
+#goflow-presentation :focus-visible { outline: 3px solid var(--scene-ink); outline-offset: 5px; }
+#goflow-presentation .presentation-scene h1:focus { outline: none; }
+#goflow-presentation .handoff-wait { color: var(--foreground); background: var(--background); }
+
+/* Four narrative reveals. Each mask carries both the ink and its opaque canvas. */
+#goflow-presentation .cinematic-stage[data-transition="0-1"] > .presentation-scene:not(.outgoing) { animation-name: signature-type-mask; }
+#goflow-presentation [data-transition="0-1"] > :not(.outgoing) .signature-word > span { animation: signature-type 620ms var(--ease-editorial) both; }
+#goflow-presentation [data-transition="0-1"] > :not(.outgoing) .signature-word:nth-child(2) > span { animation-delay: 55ms; }
+#goflow-presentation [data-transition="0-1"] > :not(.outgoing) .signature-word:nth-child(3) > span { animation-delay: 110ms; }
+#goflow-presentation .cinematic-stage[data-transition="1-2"] > .presentation-scene:not(.outgoing) { animation-name: signature-direction; }
+#goflow-presentation [data-transition="1-2"] > :not(.outgoing) .scene-content { animation: signature-direction-ink 680ms var(--ease-editorial) both; }
+#goflow-presentation .cinematic-stage[data-transition="2-3"] > .presentation-scene:not(.outgoing) { animation-name: signature-composition; }
+#goflow-presentation [data-transition="2-3"] > :not(.outgoing) .presentation-orb { animation: signature-orb 720ms var(--ease-editorial) both; }
+#goflow-presentation .cinematic-stage[data-transition="3-4"] > .presentation-scene:not(.outgoing) { animation-name: signature-orb-expand; }
+#goflow-presentation [data-transition="3-4"] > :not(.outgoing) .presentation-choices { animation: signature-choices 580ms 140ms var(--ease-editorial) both; }
+#goflow-presentation .cinematic-stage[data-opening-sequence="true"] > .presentation-scene:not(.outgoing) { animation: none; background: transparent; overflow: visible; }
+#goflow-presentation .cinematic-stage[data-opening-sequence="true"] .scene-content { animation: opening-welcome var(--welcome-duration) var(--welcome-delay) var(--ease-editorial) both; }
+#goflow-presentation[data-mode="scenes"] .cinematic-stage[data-opening-sequence="true"] > .presentation-scene { background: var(--brand-chartreuse); overflow-y: auto; }
+#goflow-presentation[data-mode="splash"][data-frame="2"] :is(.presentation-header, .presentation-footer, .presentation-slogan) { z-index: 10; }
+#goflow-presentation[data-mode="splash"][data-frame="2"] .scene-content :is(p, strong) { color: var(--brand-deep); }
+#goflow-presentation[data-mode="handoff"] .cinematic-stage > .presentation-scene { animation: none; }
+@keyframes signature-type-mask { from { clip-path: inset(0 0 100% 0); } to { clip-path: inset(0); } }
+@keyframes signature-type { from { transform: translateY(105%); } to { transform: none; } }
+@keyframes signature-direction { from { clip-path: inset(0 100% 0 0 round 0 12vw 12vw 0); } to { clip-path: inset(0 round 0); } }
+@keyframes signature-direction-ink { from { transform: translateX(24px); } to { transform: none; } }
+@keyframes signature-composition { from { clip-path: ellipse(0 0 at 82% 46%); } to { clip-path: ellipse(160% 160% at 82% 46%); } }
+@keyframes signature-orb { from { transform: translate(24px, 12px) scale(.86); } to { transform: none; } }
+@keyframes signature-orb-expand { from { clip-path: circle(0 at var(--scene-origin-x, 82vw) var(--scene-origin-y, 45vh)); } to { clip-path: circle(160vmax at var(--scene-origin-x, 82vw) var(--scene-origin-y, 45vh)); } }
+@keyframes signature-choices { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes signature-return { from { clip-path: inset(0 0 0 100%); } to { clip-path: inset(0); } }
+@keyframes signature-ink-out { from { opacity: var(--exit-opacity, 1); transform: var(--exit-transform, none); } to { opacity: 0; transform: translateY(-10px); } }
+
+/* Live shell is excluded from snapshots; only the named page has a transition owner. */
+html { view-transition-name: none; }
+::view-transition-old(workspace-page) { animation: signature-route-out var(--motion-quick) var(--ease-exit) both; }
+::view-transition-new(workspace-page) { animation: signature-route-in var(--motion-spatial) var(--ease-spatial) both; }
+html { --route-origin: translateX(12px); }
+html[data-route-motion="planning"] { --route-origin: translateY(10px); }
+html[data-route-motion="analysis"] { --route-origin: translateY(6px); }
+html[data-route-motion="agent"] { --route-origin: translateX(10px) scale(.99); }
+html[data-route-motion="review"] { --route-origin: translateX(16px); }
+html[data-route-motion="return"] { --route-origin: scale(.995); }
+@keyframes signature-route-in { from { opacity: .25; transform: var(--route-origin); } to { opacity: 1; transform: none; } }
+@keyframes signature-route-out { to { opacity: 0; transform: translateX(-5px); } }
+.shell-navigation .nav-active-indicator { height: var(--nav-height, 48px); transform: translateY(var(--nav-y, calc(var(--nav-index) * 52px))); background: var(--sidebar-hover); box-shadow: inset 3px 0 var(--brand-chartreuse); transition: transform 440ms var(--ease-settle); }
+.shell-navigation .nav-active-indicator[data-visible="false"] { visibility: hidden; }
+.shell-navigation { grid-auto-rows: minmax(48px, auto); }
+.shell-navigation .nav-item { height: auto; padding-block: 10px; transition: color var(--motion-quick), background-color var(--motion-quick); transform: none; }
+.shell-navigation .nav-item.active:not([data-selected]) { color: var(--sidebar-text); }
+.shell-navigation .nav-item.active:not([data-selected]) :is(svg, .ai-tag) { color: var(--sidebar-text); border-color: var(--sidebar-border); }
+.shell-navigation .nav-item[data-selected] { color: var(--on-brand); background: transparent; box-shadow: none; }
+.shell-navigation .nav-item[data-selected] :is(svg, .ai-tag) { color: var(--brand-chartreuse); border-color: var(--brand-chartreuse); }
+.shell-navigation .nav-item[data-pending] > span:first-of-type { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 4px; }
+.mobile-drawer[open] { animation: none; }
+.mobile-drawer::backdrop { background: var(--overlay); }
+.workspace-shell :is(button, .button, .import-button, summary) { transition-duration: var(--motion-quick); }
+.workspace-shell :is(button, .button, .import-button):active { transition-duration: var(--motion-instant); }
+.workspace-shell :is(button, .button, .import-button):disabled { transform: none; }
+.workspace-shell :is(.metric-card, .panel):not(a, button):hover { transform: none; }
+.agent-workspace .agent-request textarea { scroll-margin-block: 100px; }
+.agent-workspace .agent-records { margin-top: 24px; }
+.agent-workspace .agent-processing { animation: signature-status-in var(--motion-standard) var(--ease-flow) both; }
+.agent-workspace .action-record { animation-duration: var(--motion-spatial); }
+.agent-workspace .agent-review { border-top: 1px solid var(--border); padding-top: 20px; }
+@keyframes signature-status-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@supports (transition-timing-function: linear(0, .5, 1)) {
+  .shell-navigation .nav-active-indicator { transition-timing-function: linear(0, .14 10%, .42 25%, .72 45%, .9 65%, .98 85%, 1); }
+}
+@media (hover: hover) and (pointer: fine) {
+  #goflow-presentation:has([data-chrome-anchor="header"] .presentation-skip:hover) .scene-chrome-skip,
+  #goflow-presentation:has([data-chrome-anchor="navigation"] button[aria-label="Voltar"]:enabled:hover) .scene-chrome-back,
+  #goflow-presentation:has([data-chrome-anchor="navigation"] .scene-next:enabled:hover) .scene-chrome-next { box-shadow: 0 0 0 2px var(--scene-ink); }
+  #goflow-presentation .presentation-choice:hover { transform: translateY(-3px); box-shadow: 0 8px 0 color-mix(in srgb, var(--scene-ink) 12%, transparent); }
+  #goflow-presentation .presentation-choice:first-child:hover { background: var(--scene-hover); color: var(--scene-buttonInk); }
+  #goflow-presentation .presentation-choice:nth-child(2):hover { background: var(--scene-ink); color: var(--scene-background); }
+  #goflow-presentation :is(.presentation-skip, .presentation-footer button):hover { box-shadow: 0 0 0 2px var(--scene-ink); }
+  .shell-navigation .nav-item:not([data-selected]):hover { background: var(--sidebar-hover); transform: none; }
+  .workspace-shell :is(a.panel, a.metric-card, a.agent-card):hover { transform: translateY(-2px); border-color: var(--accent); }
+}
+@media (hover: none) {
+  .shell-navigation .nav-item:hover, .nav-item:hover > svg, .agent-suggestions button:enabled:hover, .button:hover, #goflow-presentation .presentation-choice:hover { transform: none; }
+}
+@media (max-width: 767px) {
+  #goflow-presentation .cinematic-stage > .presentation-scene { padding: 126px 20px 110px; }
+  #goflow-presentation .presentation-scene[data-scene="0"] h1 { font-size: clamp(100px, 25vw, 148px); }
+  #goflow-presentation .presentation-scene[data-scene="1"] h1 { font-size: clamp(44px, 10vw, 68px); }
+  #goflow-presentation .presentation-scene:is([data-scene="2"], [data-scene="3"]) h1 { font-size: clamp(40px, 9vw, 62px); max-width: 100%; }
+  #goflow-presentation .presentation-scene[data-scene="3"] .presentation-description { max-width: 100%; }
+  #goflow-presentation .presentation-orb { position: relative; inset: auto; width: 156px; margin: 20px auto 0; }
+  #goflow-presentation .presentation-agent { max-width: 100%; }
+  #goflow-presentation .presentation-choices { grid-template-columns: minmax(0, 1fr); }
+  #goflow-presentation .presentation-footer { padding-top: 8px; }
+  #goflow-presentation .signature-connector { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #goflow-presentation *, #goflow-presentation *::before, #goflow-presentation *::after { animation: none !important; transition: none !important; transform: none !important; clip-path: none !important; }
+  #goflow-presentation .outgoing { display: none; }
+  .shell-navigation .nav-active-indicator { transition: none; }
+  .agent-workspace .agent-processing { animation: none; }
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
+
+#goflow-presentation .cinematic-stage[data-opening-sequence="true"] { z-index: 5; }
+#goflow-presentation[data-mode="splash"] :focus-visible { outline-color: var(--on-brand); }
+/* An actual circle gives the iris an exact geometric origin, not a glyph estimate. */
+#goflow-presentation :is(.presentation-splash, .handoff-wordmark) .splash-dot { display: inline-block; width: .14em; height: .14em; margin-inline: .015em; vertical-align: baseline; border-radius: 50%; background: var(--brand-chartreuse); color: transparent; overflow: hidden; }
+
+#goflow-presentation .presentation-slogan > span,
+#goflow-presentation .scene-chrome-slogan > span {
+  transform: none !important;
+  transition: none !important;
+  animation: none !important;
+}

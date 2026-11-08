@@ -1,5 +1,6 @@
 import { SYNTHETIC_RULES, MICRO_UNITS, ceilRatio, purchaseQuantities } from "./policy.ts";
 import { projectPurchase } from "./projection.ts";
+import { formatQuantity } from "../quantity-format.ts";
 import type { BuyingConfig, EligibleNeed, PurchaseAlternative } from "./types.ts";
 
 export function maximumLots(need: EligibleNeed): number {
@@ -33,8 +34,8 @@ export function makeAlternative(need: EligibleNeed, lots: number, config: Buying
       config.scenario.safetyStock === "none" ? "Cenário sem buffer de segurança." : "Buffer normal aproximado de 96,5%, sob independência e estacionariedade; sem garantia de serviço.",
       "Custo estimado pelo custo unitário atual do catálogo, por unidade física; não é cotação do fornecedor.",
     ],
-    explanation: service > 0 ? "Alternativa acrescenta " + service + " unidades de atendimento no cenário e " + buffer + " unidades de buffer; respeita MOQ e unidade de compra." :
-      "Alternativa acrescenta " + buffer + " unidades ao buffer de segurança estimado, sem aumento do atendimento nominal no horizonte.",
+    explanation: service > 0 ? "Atendimento adicional estimado: " + formatQuantity(service) + " unidades no cenário; buffer adicional: " + formatQuantity(buffer) + " unidades. Respeita MOQ e unidade de compra." :
+      "Buffer adicional estimado: " + formatQuantity(buffer) + " unidades, sem aumento do atendimento nominal no horizonte.",
   };
 }
 export function generateAlternatives(need: EligibleNeed, config: BuyingConfig): PurchaseAlternative[] {

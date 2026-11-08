@@ -197,6 +197,9 @@ describe.each([["claro", light], ["escuro", dark]] as const)("contraste %s", (_n
   });
 });
 it("usa tokens nos componentes, preserva a marca e não inverte cores", () => {
+  expect(css).toContain("--workspace-field: var(--background)");
+  expect(css).not.toContain("body { background: var(--workspace-field); }");
+  expect(css).toContain('.presentation-dialog[data-mode="scenes"][data-scene-transition="initial"] { transition: none; }');
   expect(css.slice(css.indexOf("@theme inline"))).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   expect(css).not.toMatch(/filter:\s*invert/);
   expect(light.navy).toBe("#19234A"); expect(light.blue).toBe("#315EB5");

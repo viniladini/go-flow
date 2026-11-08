@@ -31,6 +31,20 @@ beforeEach(async () => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe("go.agent e Central de Ações", () => {
+  it("mostra limites reais e agrupa 191 ressalvas mantendo o ultimo SKU acessivel", async () => {
+    const receipt = agentReceipt();
+    receipt.action.alertDetails = Array.from({ length: 191 }, (_, i) => ({ code: "pending_orders_uncertain", sku: `DEMO-ALERT-${i}`, message: "Pedidos pendentes não creditados." }));
+    receipt.action.alerts = receipt.action.alertDetails.map((alert) => `${alert.sku} · ${alert.message}`);
+    receipt.action.alertCount = 191;
+    vi.mocked(agentTransport.execute).mockResolvedValueOnce(receipt);
+    expect(container.textContent).toContain("três chamadas");
+    await act(async () => { current.agent.setDraft("Planeje compras da demonstração."); await current.agent.execute(); });
+    expect(container.querySelectorAll(".alert-category")).toHaveLength(1);
+    expect(container.querySelector(".alert-category")?.textContent).toContain("191 ocorrências");
+    expect(container.querySelector(".alert-category")?.textContent).toContain("DEMO-ALERT-190");
+    expect(container.querySelector(".action-outcome")?.textContent).toContain("Data-base sintética");
+    expect(container.querySelector(".scenario-reference")?.textContent).toContain("Execução:");
+  });
   it("sugestão preenche o pedido para revisão sem executar ou transmitir", async () => {
     const suggestion = container.querySelector<HTMLButtonElement>(".agent-suggestions button")!;
     await act(async () => suggestion.click());

@@ -1247,3 +1247,40 @@ npm run build
 A interface deve ser verificada também no navegador real.
 
 Não fazer commit, push ou deploy automaticamente durante tarefas visuais.
+
+## Apresentacao, motion e calendario demonstrativo
+
+O workspace preserva fundos, superficies e contraste dos temas originais.
+`--workspace-field` aponta para `--background`, inclusive no handoff. A paleta
+multicolorida pertence exclusivamente a apresentacao, nunca ao dashboard.
+
+O ponto original usa `--brand-chartreuse` e expande em 820 ms. A cena 01 nasce
+no MESMO token. A sequencia manual agora e chartreuse, deep navy, expressive
+blue, canvas off-white e deep navy, conforme as cinco cenas v4. Cada canvas
+carrega fundo e tinta juntos; mascaras diferentes substituem a interpolacao
+que podia reduzir contraste durante a passagem. O rosa escuro e restrito ao
+"ola.". Avancar/voltar substitui a transicao sem bloquear o clique.
+Reduced motion elimina movimentos e mascaras. Matriz calculada, arquitetura
+e roteiro local em [Signature Motion](docs/SIGNATURE_MOTION.md).
+
+Ao terminar, a cortina usa o fundo do tema atual e aguarda o destino montado.
+O shell e as sessoes permanecem montados. Navegadores com View Transitions
+fazem crossfade entre snapshots do conteudo na navegacao SPA; o fallback usa
+Web Animations sem atrasar a navegacao. A sidebar responde ao destino pendente
+antes do commit. Drawer e paineis possuem entrada e saida coordenadas; seus
+controles continuam nativos e acessiveis por teclado. Nenhuma biblioteca nova.
+
+Novas demos capturam o dia civil da execucao em America/Sao_Paulo. Historico de
+120 dias, pedidos, lead times e horizonte (+2 a +90 dias) se deslocam juntos,
+sem mudar quantidades ou formulas. Cache publico expira por dia; HTML estatico
+antigo e atualizado apos hidratacao, sem mismatch. Uma aba aberta confere a
+virada a cada 30 segundos. Importacoes e comprovantes anteriores nao sao
+reescritos. Data-base e periodo projetado permanecem separados da execucao real.
+
+As melhorias anteriores de formatacao, alerta por categoria e transparencia
+do orcamento permanecem. Nao elevar cards somente informativos nem simular
+etapas de processamento que o servidor nao fornece.
+
+A experiencia visual NAO esta aprovada sem inspecao real no navegador, incluindo
+mobile, claro/escuro/sistema, passagem do ponto para a primeira cena e retorno
+ao workspace. Testes automaticos nao substituem essa inspecao.

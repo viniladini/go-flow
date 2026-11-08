@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach } from "vitest";
 import { createOperationalDemo } from "@/lib/operations/demo";
 import { computeOperation, getOperationalDemo } from "@/lib/operations/service";
 import { createOperationalResource, type OperationalWorker } from "@/lib/operations/resource";
@@ -14,7 +15,8 @@ import type { OperationalBuyingPolicy } from "@/lib/smart-buying/types";
 import type { OperationalRequest, OperationalResponse } from "@/lib/operations/operations.worker";
 
 const buying = (operation: ImportedOperation) => createOperationalBuyingPlan({ dataset: operation.dataset, origin: "provided_dataset", policy: operation.parameters });
-afterEach(() => vi.unstubAllGlobals());
+beforeEach(() => vi.setSystemTime(new Date("2026-11-08T15:00:00Z")));
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 describe("demo operacional independente", () => {
   it("gera 500 SKUs, 120 dias de posições, fornecedores e compras válidos", () => {
     const { dataset } = createOperationalDemo();
@@ -24,7 +26,7 @@ describe("demo operacional independente", () => {
     expect(dataset.purchases.filter((p) => !p.data_recebimento)).toHaveLength(100);
     expect(dataset.skus.some((s) => s.status === "descontinuado")).toBe(true);
   });
-  it("é determinística, sem usar relógio, aleatoriedade ou rede", () => {
+  it("é determinística, para um relógio controlado, sem aleatoriedade ou rede", () => {
     const first = createOperationalDemo();
     const random = vi.spyOn(Math, "random").mockImplementation(() => { throw new Error("Aleatoriedade proibida"); });
     try { expect(createOperationalDemo()).toEqual(first); } finally { random.mockRestore(); }

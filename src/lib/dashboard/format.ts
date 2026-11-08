@@ -1,4 +1,5 @@
 const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+export { formatQuantity } from "../quantity-format";
 const decimal = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 });
 const date = new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" });
 export const UNAVAILABLE = "Indisponível";

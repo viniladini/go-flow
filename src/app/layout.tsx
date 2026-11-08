@@ -7,6 +7,7 @@ import { APPEARANCE_INIT_SCRIPT } from "@/lib/theme/appearance";
 import { Presentation } from "@/components/presentation";
 import { PRESENTATION_INIT_SCRIPT } from "@/lib/presentation";
 import "./globals.css";
+import "./signature-motion.css";
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"], display: "swap" });
 const jakarta = Plus_Jakarta_Sans({ variable: "--font-jakarta", subsets: ["latin"], display: "swap" });
 export const metadata: Metadata = {

@@ -1,11 +1,13 @@
 import { shiftDate } from "../analytics/math";
+import { demoReferenceDate } from "./demo-calendar";
 import type { Dataset, FileName } from "../analytics/types";
 import type { OperationalParameters } from "../flow-import/types";
 
-/** Independent ledger generator. No I/O, clock, randomness, or challenge-derived values. */
-export function createOperationalDemo() {
-  const parameters: OperationalParameters = { operation: "Operação demonstrativa", referenceDate: "2032-04-01",
-    horizonStart: "2032-04-03", horizonEnd: "2032-06-30", budgetCents: 12_500_000, serviceBps: 9500,
+/** Independent ledger, reproducible for a supplied clock. No I/O or private inputs. */
+export function createOperationalDemo(now: Date = new Date()) {
+  const referenceDate = demoReferenceDate(now);
+  const parameters: OperationalParameters = { operation: "Operação demonstrativa", referenceDate,
+    horizonStart: shiftDate(referenceDate, 2), horizonEnd: shiftDate(referenceDate, 90), budgetCents: 12_500_000, serviceBps: 9500,
     annualCapitalBps: 900, monthlyStorageBps: 85, maxDiscountBps: 2500, demandWindowDays: 30 };
   const dataset: Dataset = { referenceDate: parameters.referenceDate, policy: "exploratory_exact_dedup_conflict_quarantine",
     skus: [], suppliers: [], sales: [], stocks: [], purchases: [], issues: [] };

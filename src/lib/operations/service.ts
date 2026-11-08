@@ -5,6 +5,7 @@ import type { DashboardModel } from "../dashboard/models";
 import type { BuyingResult } from "../smart-buying/types";
 import type { ImportedOperation, OperationalParameters } from "../flow-import/types";
 import { createOperationalDemo } from "./demo";
+import { demoReferenceDate } from "./demo-calendar";
 
 export interface Opportunity {
   sku: string; name: string; kind: "excess" | "low_movement" | "discontinued";
@@ -15,8 +16,8 @@ export interface OperationalResult {
   buying: BuyingResult | null; buyingError: string | null; opportunities: Opportunity[];
 }
 /** No private cache. Every imported computation uses exactly one supplied dataset. */
-export function computeOperation(operation: ImportedOperation | null): OperationalResult {
-  const { dataset, parameters } = operation ?? createOperationalDemo();
+export function computeOperation(operation: ImportedOperation | null, now: Date = new Date()): OperationalResult {
+  const { dataset, parameters } = operation ?? createOperationalDemo(now);
   const source = operation ? "imported_local" : "demo";
   const analytics = analyzeOperationalDataset(dataset, operationalAnalyticsConfig(parameters.referenceDate, parameters.demandWindowDays));
   const model = createDashboardModel(dataset, analytics, operation ? { kind: "imported_local", id: "goflow-imported-v1",
@@ -40,4 +41,7 @@ export function computeOperation(operation: ImportedOperation | null): Operation
 }
 // Only independently synthetic results may be cached across SSR requests.
 let demo: OperationalResult | undefined;
-export function getOperationalDemo(): OperationalResult { return demo ??= computeOperation(null); }
+export function getOperationalDemo(): OperationalResult {
+  if (!demo || demo.parameters.referenceDate !== demoReferenceDate()) demo = computeOperation(null);
+  return demo;
+}

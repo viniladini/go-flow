@@ -3,11 +3,13 @@ import React, { act, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runInNewContext } from "node:vm";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { Presentation, PresentationReplay } from "@/components/presentation";
 import { FlowOrb } from "@/components/flow-orb";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ImportSessionProvider, useImportSession } from "@/components/import-session-provider";
-import { PRESENTATION_INIT_SCRIPT, PRESENTATION_KEY, PRESENTATION_SCENES, viewportIris } from "@/lib/presentation";
+import { PRESENTATION_INIT_SCRIPT, PRESENTATION_KEY, PRESENTATION_SCENES, PRESENTATION_PALETTE, IRIS_EXPANSION_MS, SCENE_TRANSITION_MS, viewportIris } from "@/lib/presentation";
 import type { ImportSession } from "@/lib/flow-import/session";
 import { validateImport } from "@/lib/flow-import/validation";
 import { assignmentsFor, importFixture, syntheticParameters } from "../fixtures/flow-import";
@@ -35,8 +37,9 @@ async function click(text: string) {
   const button = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes(text));
   expect(button, text).toBeDefined();
   await act(async () => button!.click());
-  if (dialog().getAttribute("data-mode") === "splash" && dialog().getAttribute("data-frame") === "2") await tick(1100);
-  if (container.querySelector(".outgoing")) await tick(850);
+  if (dialog().getAttribute("data-mode") === "splash" && dialog().getAttribute("data-frame") === "2") await tick(IRIS_EXPANSION_MS);
+  if (container.querySelector(".outgoing")) await tick(SCENE_TRANSITION_MS);
+  if (dialog().getAttribute("data-mode") === "handoff") await tick(container.querySelector(".workspace-iris")?.hasAttribute("data-fast") ? 120 : 720);
 }
 async function lastScene() { await click("Conheça"); await click("Começar"); for (let i = 0; i < 3; i++) await click("Avançar"); }
 beforeEach(() => {
@@ -56,10 +59,179 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("experiência de apresentação", () => {
+  it("aviso pertence a cada canvas e conserva suas cores em todas as transicoes", async () => {
+    const stylesheet = document.createElement("style");
+    const globals = readFileSync(resolve("src/app/globals.css"), "utf8");
+    stylesheet.textContent = globals.match(/:root\s*\{[^}]+\}/)![0] + readFileSync(resolve("src/app/signature-motion.css"), "utf8");
+    document.head.append(stylesheet);
+    try {
+      await mount();
+      const label = dialog().querySelector("[data-notice-anchor]")!.textContent;
+      expect(label).toBe("Protótipo independente · Gogroup");
+      await click("Conheça");
+      const controls = dialog().querySelector('.presentation-footer nav');
+      const pairs = [["#DCEB16", "#101629"], ["#101629", "#FFFFFF"], ["#1761B1", "#FFFFFF"], ["#F7F7F3", "#101629"], ["#101629", "#FFFFFF"]];
+      const check = (notice: HTMLElement, index: number) => {
+        expect(notice.textContent).toBe(label);
+        expect(notice.parentElement?.dataset.scene).toBe(String(index));
+        expect(notice.closest(".scene-content")).toBeNull(); // No independent exit fade.
+        const style = getComputedStyle(notice);
+        expect(style.backgroundColor.toUpperCase()).toBe(pairs[index][0]);
+        expect(style.color.toUpperCase()).toBe(pairs[index][1]);
+        expect(style.borderColor.toUpperCase()).toBe(pairs[index][1]);
+        expect(style.animation).toBe("none"); expect(style.transition).toBe("none");
+      };
+      let index = 0;
+      check(dialog().querySelector<HTMLElement>(".presentation-scene-notice")!, index);
+      for (const next of [1, 2, 3, 4, 3, 2, 1, 0]) {
+        const previous = dialog().querySelector<HTMLElement>(".presentation-scene:not(.outgoing) .presentation-scene-notice")!;
+        const button = dialog().querySelector<HTMLButtonElement>(next > index ? ".scene-next" : 'button[aria-label="Voltar"]')!;
+        await act(async () => button.click());
+        expect(dialog().querySelector(".outgoing .presentation-scene-notice")).toBe(previous);
+        check(previous, index);
+        const current = dialog().querySelector<HTMLElement>(".presentation-scene:not(.outgoing) .presentation-scene-notice")!;
+        check(current, next);
+        expect(previous.getAttribute("aria-hidden")).toBe("true");
+        expect(current.hasAttribute("aria-hidden")).toBe(false);
+        expect(getComputedStyle(dialog().querySelector(".presentation-footer")!).backgroundColor).toBe("transparent");
+        expect(getComputedStyle(dialog().querySelector("[data-notice-anchor]")!).visibility).toBe("hidden");
+        expect(dialog().querySelector('.presentation-footer nav')).toBe(controls);
+        await tick(SCENE_TRANSITION_MS - 1); check(previous, index); check(current, next);
+        await tick(1);
+        expect(dialog().querySelectorAll(".presentation-scene-notice")).toHaveLength(1);
+        index = next;
+      }
+    } finally { stylesheet.remove(); }
+  });
+  it("interromper e reverter cenas mantem no maximo dois avisos sem travar os controles", async () => {
+    await mount(); await click("Conheça");
+    for (const next of [1, 2, 3]) {
+      const button = dialog().querySelector<HTMLButtonElement>(".scene-next")!;
+      expect(button.disabled).toBe(false);
+      await act(async () => button.click());
+      expect(dialog().dataset.scene).toBe(String(next));
+      expect(dialog().querySelectorAll(".presentation-scene-notice")).toHaveLength(2);
+      expect(dialog().querySelector(".outgoing .presentation-scene-notice")?.parentElement?.dataset.scene).toBe(String(next - 1));
+    }
+    await act(async () => dialog().querySelector<HTMLButtonElement>('button[aria-label="Voltar"]')!.click());
+    expect(dialog().dataset.scene).toBe("2");
+    expect(dialog().querySelectorAll(".presentation-scene-notice")).toHaveLength(2);
+    await tick(SCENE_TRANSITION_MS);
+    expect(dialog().querySelectorAll(".presentation-scene-notice")).toHaveLength(1);
+    expect(dialog().querySelector(".presentation-scene-notice")?.parentElement?.dataset.scene).toBe("2");
+  });
+  it("mede o slot original e acompanha quebra de linha e resize no mobile", async () => {
+    await mount();
+    const footer = dialog().querySelector<HTMLElement>(".presentation-footer")!;
+    const anchor = dialog().querySelector<HTMLElement>("[data-notice-anchor]")!;
+    const barRect = vi.spyOn(footer, "getBoundingClientRect").mockReturnValue(new DOMRect(20, 704, 350, 76));
+    const copyRect = vi.spyOn(anchor, "getBoundingClientRect").mockReturnValue(new DOMRect(20, 724, 150, 28));
+    await click("Conheça");
+    expect(dialog().style.getPropertyValue("--notice-bar-x")).toBe("20px");
+    expect(dialog().style.getPropertyValue("--notice-bar-y")).toBe("704px");
+    expect(dialog().style.getPropertyValue("--notice-bar-width")).toBe("350px");
+    expect(dialog().style.getPropertyValue("--notice-copy-y")).toBe("20px");
+    expect(dialog().style.getPropertyValue("--notice-copy-height")).toBe("28px");
+    barRect.mockReturnValue(new DOMRect(32, 420, 780, 58));
+    copyRect.mockReturnValue(new DOMRect(32, 444, 188, 14));
+    await act(async () => window.dispatchEvent(new Event("resize")));
+    expect(dialog().style.getPropertyValue("--notice-bar-x")).toBe("32px");
+    expect(dialog().style.getPropertyValue("--notice-bar-y")).toBe("420px");
+    expect(dialog().style.getPropertyValue("--notice-copy-y")).toBe("24px");
+    expect(dialog().style.getPropertyValue("--notice-copy-height")).toBe("14px");
+    expect(footer.querySelector("[data-notice-anchor]")).toBe(anchor);
+  });
+  it("reduced motion mantem apenas o aviso da cena atual e preserva o aviso da abertura", async () => {
+    reduce = true; await mount();
+    expect(dialog().querySelector("[data-notice-anchor]")?.hasAttribute("aria-hidden")).toBe(false);
+    await click("Conheça");
+    for (const index of [0, 1, 2, 3, 4]) {
+      expect(dialog().querySelectorAll(".presentation-scene-notice")).toHaveLength(1);
+      expect(dialog().querySelector(".presentation-scene-notice")?.parentElement?.dataset.scene).toBe(String(index));
+      expect(dialog().querySelector(".presentation-scene-notice")?.hasAttribute("aria-hidden")).toBe(false);
+      expect(dialog().querySelector("[data-notice-anchor]")?.getAttribute("aria-hidden")).toBe("true");
+      if (index < 4) await click(index === 0 ? "Começar" : "Avançar");
+    }
+  });
+  it("mantem tinta rosa e fundo chartreuse apos a expansao, durante ociosidade e na saida", async () => {
+    const stylesheet = document.createElement("style");
+    const globals = readFileSync(resolve("src/app/globals.css"), "utf8");
+    stylesheet.textContent = globals.match(/:root\s*\{[^}]+\}/)![0]
+      + globals.match(/:root\[data-theme="dark"\]\s*\{[^}]+\}/)![0]
+      + readFileSync(resolve("src/app/signature-motion.css"), "utf8");
+    document.head.append(stylesheet);
+    const previousTheme = document.documentElement.getAttribute("data-theme");
+    try {
+      await mount();
+      await act(async () => dialog().querySelector<HTMLButtonElement>(".presentation-next")!.click());
+      const welcome = dialog().querySelector<HTMLHeadingElement>("#presentation-title")!;
+      const firstScene = welcome.closest<HTMLElement>(".presentation-scene")!;
+      expect(getComputedStyle(welcome).color.toUpperCase()).toBe("#9D2458");
+
+      // happy-dom does not model :is()'s max-arm specificity like a browser.
+      // Guard the original conflict too: no body-ink rule may select this h1.
+      const directInkRules = [...stylesheet.sheet!.cssRules].filter((rule) => {
+        const styleRule = rule as CSSStyleRule;
+        return styleRule.selectorText && styleRule.style?.color === "var(--scene-ink)" && welcome.matches(styleRule.selectorText);
+      });
+      expect(directInkRules).toHaveLength(0);
+      expect(getComputedStyle(welcome).transition).toBe("none");
+
+      await tick(IRIS_EXPANSION_MS);
+      const snapshot = () => ({ title: getComputedStyle(welcome).color.toUpperCase(), background: getComputedStyle(firstScene).backgroundColor.toUpperCase() });
+      const settled = { title: "#9D2458", background: "#DCEB16" };
+      expect(snapshot()).toEqual(settled);
+      for (const theme of ["light", "dark"]) {
+        document.documentElement.dataset.theme = theme;
+        await tick(60_000);
+        expect(getComputedStyle(document.documentElement).getPropertyValue("--background").trim()).toBe(theme === "dark" ? "#101629" : "#F7F8FB");
+        expect(snapshot()).toEqual(settled);
+        expect(dialog().dataset.scene).toBe("0");
+        expect(dialog().querySelector("#presentation-title")).toBe(welcome);
+      }
+      await act(async () => dialog().querySelector<HTMLButtonElement>(".scene-next")!.click());
+      expect(firstScene.classList.contains("outgoing")).toBe(true);
+      expect(snapshot()).toEqual(settled);
+      await tick(SCENE_TRANSITION_MS - 1);
+      expect(snapshot()).toEqual(settled);
+    } finally {
+      stylesheet.remove();
+      if (previousTheme === null) document.documentElement.removeAttribute("data-theme");
+      else document.documentElement.setAttribute("data-theme", previousTheme);
+    }
+  });
+  it("comeca no verde e permite redirecionar a sequencia de cores durante a transicao", async () => {
+    await mount(); await click("Conheça");
+    expect(dialog().getAttribute("data-palette")).toBe("lime");
+    const start = [...dialog().querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Começar")!;
+    await act(async () => start.click());
+    expect(dialog().getAttribute("data-palette")).toBe("deep");
+    const forward = dialog().querySelector<HTMLButtonElement>('[aria-label="Avançar"]')!;
+    expect(forward.disabled).toBe(false);
+    await act(async () => forward.click());
+    expect(dialog().getAttribute("data-palette")).toBe("blue");
+    expect(dialog().querySelectorAll(".outgoing")).toHaveLength(1);
+    await tick(SCENE_TRANSITION_MS);
+    await click("Avançar"); expect(dialog().getAttribute("data-palette")).toBe("paper");
+    await click("Avançar"); expect(dialog().getAttribute("data-palette")).toBe("deep");
+  });
+  it("mantem o dialogo ate a iris cobrir o viewport e revela sobre uma superficie unica", async () => {
+    await mount(); await lastScene();
+    const button = [...dialog().querySelectorAll("button")].find((b) => b.textContent?.includes("Explorar ambiente demonstrativo"))!;
+    await act(async () => button.click());
+    expect(dialog().open).toBe(true);
+    expect(container.querySelector(".workspace-iris")).not.toBeNull();
+    expect(container.querySelector(".presentation-handoff")).toBeNull();
+    await tick(719); expect(dialog().open).toBe(true);
+    await tick(1); expect(dialog().open).toBe(false);
+    expect(container.querySelector(".presentation-handoff")?.textContent).toBe("");
+    expect(container.querySelector(".presentation-underlay")?.getAttribute("data-handoff")).toBe("true");
+    expect(mounts).toBe(1);
+  });
   it("não emite warnings de keys ao sobrepor cenas, voltar e rever", async () => {
     const errors = vi.spyOn(console, "error"); // Call through: warnings remain visible and fail this test.
     await mount(); await lastScene(); await click("Voltar"); await click("Avançar");
-    await click("Pular apresentação"); await tick(850); await click("Rever apresentação"); await lastScene();
+    await click("Pular apresentação"); await tick(SCENE_TRANSITION_MS); await click("Rever apresentação"); await lastScene();
     expect(errors.mock.calls.flat().map(String).join(" ")).not.toMatch(/same key|unique.*key/i);
   });
   it("forma go.flow e só chega ao olá. após Conheça o go.flow", async () => {
@@ -78,32 +250,32 @@ describe("experiência de apresentação", () => {
     await tick(600_000); expect(title()).toBe("olá.");
     expect([...dialog().querySelectorAll("button")].filter((b) => b.textContent?.includes("Começar"))).toHaveLength(1);
     expect(dialog().querySelector(".presentation-scene button")).toBeNull();
-    await click("Começar"); expect(title()).toBe("o próximo movimento começa aqui.");
-    await tick(600_000); expect(title()).toBe("o próximo movimento começa aqui.");
+    await click("Começar"); expect(title()).toBe(PRESENTATION_SCENES[1].title);
+    await tick(600_000); expect(title()).toBe(PRESENTATION_SCENES[1].title);
   });
   it("sobrepõe as cenas sem desmontar a anterior e ignora avanço duplicado", async () => {
     await mount(); await click("Conheça");
     const previous = dialog().querySelector(".presentation-scene")!;
     const start = [...dialog().querySelectorAll("button")].find((b) => b.textContent?.includes("Começar"))!;
     await act(async () => { start.click(); start.click(); });
-    expect(title()).toBe("o próximo movimento começa aqui.");
+    expect(title()).toBe(PRESENTATION_SCENES[1].title);
     expect(dialog().querySelector(".outgoing")).toBe(previous);
     expect(previous.getAttribute("aria-hidden")).toBe("true"); expect(previous.hasAttribute("inert")).toBe(true);
     expect(dialog().querySelectorAll("#presentation-title")).toHaveLength(1);
-    await tick(849); expect(dialog().querySelector(".outgoing")).toBe(previous);
+    await tick(SCENE_TRANSITION_MS - 1); expect(dialog().querySelector(".outgoing")).toBe(previous);
     await tick(1); expect(dialog().querySelector(".outgoing")).toBeNull();
-    expect(title()).toBe("o próximo movimento começa aqui.");
+    expect(title()).toBe(PRESENTATION_SCENES[1].title);
   });
   it("mantém o mesmo slogan durante as cinco cenas e ao voltar", async () => {
-    await mount(); const slogan = dialog().querySelector(".presentation-slogan")!;
+    await mount(); const slogan = dialog().querySelector('[data-chrome-anchor="slogan"]')!;
     await click("Conheça");
     for (let scene = 0; scene < 5; scene++) {
-      expect(dialog().querySelector(".presentation-slogan")).toBe(slogan);
-      expect(dialog().querySelectorAll(".presentation-slogan")).toHaveLength(1);
+      expect(dialog().querySelector('[data-chrome-anchor="slogan"]')).toBe(slogan);
+      expect(dialog().querySelectorAll('[data-chrome-anchor="slogan"]')).toHaveLength(1);
       expect(slogan.textContent).toBe("From insight to action.");
       if (scene < 4) await click(scene === 0 ? "Começar" : "Avançar");
     }
-    await click("Voltar"); expect(dialog().querySelector(".presentation-slogan")).toBe(slogan);
+    await click("Voltar"); expect(dialog().querySelector('[data-chrome-anchor="slogan"]')).toBe(slogan);
   });
   it("preserva geometria e identidade da cena de saída enquanto a próxima entra", async () => {
     await mount(); await click("Conheça"); await click("Começar"); await click("Avançar"); await click("Avançar");
@@ -114,9 +286,61 @@ describe("experiência de apresentação", () => {
     await act(async () => forward.click());
     const outgoing = dialog().querySelector<HTMLElement>(".outgoing")!;
     expect(outgoing).toBe(scene); expect(outgoing.dataset.scene).toBe("3");
-    expect(outgoing.style.width).toBe("1000px"); expect(outgoing.style.height).toBe("420px");
-    expect(outgoing.style.left).toBe("40px"); expect(outgoing.style.top).toBe("40px");
-    await tick(850); expect(dialog().querySelector(".outgoing")).toBeNull();
+    expect(outgoing.style.width).toBe(""); expect(outgoing.style.height).toBe("");
+    expect(outgoing.style.getPropertyValue("--scene-background")).toBe("var(--brand-canvas)");
+    expect(outgoing.style.getPropertyValue("--scene-ink")).toBe("var(--brand-deep)");
+    await tick(SCENE_TRANSITION_MS); expect(dialog().querySelector(".outgoing")).toBeNull();
+  });
+  it("preserva logo e primeira cena durante os 820 ms de expansao", async () => {
+    await mount();
+    const logo = dialog().querySelector(".splash-wordmark");
+    await tick(620);
+    expect(dialog().querySelector(".splash-wordmark")).toBe(logo);
+    await act(async () => dialog().querySelector<HTMLButtonElement>(".presentation-next")!.click());
+    expect(dialog().querySelector(".splash-wordmark")).toBe(logo);
+    const welcome = dialog().querySelector("#presentation-title");
+    expect(welcome?.textContent).toBe(PRESENTATION_SCENES[0].title);
+    expect(dialog().dataset.mode).toBe("splash");
+    await tick(IRIS_EXPANSION_MS - 1);
+    expect(dialog().dataset.mode).toBe("splash");
+    await tick(1);
+    expect(dialog().dataset.mode).toBe("scenes");
+    expect(dialog().querySelector("#presentation-title")).toBe(welcome);
+    expect(document.activeElement).toBe(welcome);
+  });
+  it("mantem a paleta sem interacao e aceita cliques durante transicoes", async () => {
+    await mount();
+    await act(async () => dialog().querySelector<HTMLButtonElement>(".presentation-next")!.click());
+    await tick(IRIS_EXPANSION_MS);
+    for (const [index, palette] of PRESENTATION_PALETTE.entries()) {
+      expect(dialog().dataset.palette).toBe(palette);
+      await tick(600_000);
+      expect(dialog().dataset.scene).toBe(String(index));
+      expect(dialog().dataset.palette).toBe(palette);
+      if (index < 4) {
+        await act(async () => dialog().querySelector<HTMLButtonElement>(".scene-next")!.click());
+        expect(dialog().dataset.scene).toBe(String(index + 1));
+      }
+    }
+    const back = dialog().querySelector<HTMLButtonElement>('button[aria-label="Voltar"]')!;
+    await act(async () => back.click());
+    await act(async () => back.click());
+    expect(dialog().dataset.scene).toBe("2");
+    await tick(SCENE_TRANSITION_MS);
+    expect(dialog().querySelector(".outgoing")).toBeNull();
+    expect(dialog().querySelectorAll("#presentation-title")).toHaveLength(1);
+  });
+  it("pular cancela expansao sem reabrir a apresentacao", async () => {
+    await mount();
+    await act(async () => dialog().querySelector<HTMLButtonElement>(".presentation-next")!.click());
+    await tick(100);
+    await act(async () => dialog().querySelector<HTMLButtonElement>(".presentation-skip")!.click());
+    await tick(120);
+    expect(dialog().open).toBe(false);
+    await tick(60_000);
+    expect(dialog().open).toBe(false);
+    expect(dialog().dataset.mode).toBe("closed");
+    expect(navigation.push).not.toHaveBeenCalled();
   });
   it("foco do handoff usa preventScroll e corrige somente salto nativo do diálogo", async () => {
     await mount(); await click("Conheça");
@@ -137,20 +361,19 @@ describe("experiência de apresentação", () => {
     const rect = vi.spyOn(point, "getBoundingClientRect").mockReturnValue(new DOMRect(200, 420, 20, 60));
     await act(async () => { dialog().querySelector<HTMLButtonElement>(".presentation-next")!.click(); });
     expect(dialog().style.getPropertyValue("--iris-x")).toBe("210px");
-    expect(dialog().style.getPropertyValue("--iris-size")).toBe(`${viewportIris(window.innerWidth, window.innerHeight, 210, 471).diameter}px`);
+    expect(dialog().style.getPropertyValue("--iris-size")).toBe(`${viewportIris(window.innerWidth, window.innerHeight, 210, 450).diameter}px`);
     rect.mockReturnValue(new DOMRect(50, 50, 20, 60));
     await act(async () => { window.dispatchEvent(new Event("resize")); });
     expect(dialog().style.getPropertyValue("--iris-x")).toBe("60px");
     expect(dialog().querySelector(".presentation-iris")).not.toBeNull();
   });
   it("usa exatamente os cinco títulos aprovados e permite voltar", async () => {
-    expect(PRESENTATION_SCENES.map((s) => s.title)).toEqual(["olá.", "o próximo movimento começa aqui.", "conheça o go.agent.", "como funciona.", "como deseja começar?"]);
+    expect(PRESENTATION_SCENES.map((s) => s.title)).toEqual(["ol\u00e1.", "ousados. inquietos. criativos.", "o pr\u00f3ximo movimento come\u00e7a aqui.", "conhe\u00e7a o go.agent.", "como deseja come\u00e7ar?"]);
     await mount(); await click("Conheça");
     for (const scene of PRESENTATION_SCENES) {
       expect(title()).toBe(scene.title); if (scene.title !== "como deseja começar?") await click(scene.title === "olá." ? "Começar" : "Avançar");
     }
-    await click("Voltar"); expect(title()).toBe("como funciona.");
-    await click("Voltar");
+    await click("Voltar"); expect(title()).toBe(PRESENTATION_SCENES[3].title);
     expect(container.querySelector(".presentation-agent")?.textContent).toContain("Cálculo determinístico");
     expect(container.querySelector('.presentation-orb svg[role="img"]')?.getAttribute("aria-label")).toBe("Flow Orb, mascote do go.agent");
   });
@@ -159,7 +382,7 @@ describe("experiência de apresentação", () => {
     expect(dialog().open).toBe(false); expect(session.getSnapshot().source).toBe("demo");
     expect(window.localStorage.length).toBe(1); expect(window.localStorage.getItem(PRESENTATION_KEY)).toBe("seen");
     expect(document.activeElement?.id).toBe("conteudo");
-    await tick(850); expect(container.querySelector(".presentation-handoff")).toBeNull(); expect(mounts).toBe(1);
+    await tick(1200); expect(container.querySelector(".presentation-handoff")).toBeNull(); expect(mounts).toBe(1);
   });
   it("navega ao Flow Import antes de encerrar o handoff sem remontar a sessão", async () => {
     await mount(); const before = session; await lastScene(); await click("Analisar operação local");
@@ -170,10 +393,9 @@ describe("experiência de apresentação", () => {
     await mount(); await lastScene(); dialog().scrollTop = 220;
     await click("Explorar ambiente demonstrativo");
     const surface = container.querySelector<HTMLElement>(".presentation-handoff")!;
-    expect(surface.scrollTop).toBe(220); expect(surface.textContent).toContain("como deseja começar?");
-    expect(surface.textContent).toContain("Analisar operação local");
+    expect(surface.scrollTop).toBe(220); expect(surface.textContent).toBe("");
     expect(surface.hasAttribute("inert")).toBe(true);
-    await tick(850); expect(container.querySelector(".presentation-handoff")).toBeNull();
+    await tick(1200); expect(container.querySelector(".presentation-handoff")).toBeNull();
   });
   it("não inicia handoff até o destino estar montado", async () => {
     navigation.push.mockImplementation(() => {});
@@ -187,30 +409,28 @@ describe("experiência de apresentação", () => {
     expect(dialog().open).toBe(false); expect(navigation.push).not.toHaveBeenCalled();
     await tick(3000); expect(dialog().open).toBe(false);
   });
-  it("visitante recorrente vê abertura curta, preserva deep link e pode rever", async () => {
+  it("visitante recorrente entra diretamente, preserva deep link e pode rever", async () => {
     navigation.pathname = "/estoque";
     window.localStorage.setItem(PRESENTATION_KEY, "seen"); await mount();
-    expect(dialog().open).toBe(true);
-    expect(dialog().querySelectorAll("button, header, footer, p, .cinematic-guide, .presentation-curves")).toHaveLength(0);
-    expect(dialog().textContent).toBe("go.flow");
-    await tick(250); expect(container.querySelector(".splash-wordmark")?.getAttribute("data-frame")).toBe("1");
-    await tick(950); expect(dialog().open).toBe(false); expect(title()).toBeUndefined();
-    expect(container.querySelector(".presentation-handoff")?.textContent).toBe("go.flow");
+    expect(dialog().open).toBe(false);
+    await tick(60_000);
+    expect(dialog().open).toBe(false); expect(title()).toBeUndefined();
+    expect(container.querySelector(".presentation-handoff")).toBeNull();
     expect(navigation.push).not.toHaveBeenCalled(); expect(navigation.pathname).toBe("/estoque");
-    await tick(850);
+    await tick(SCENE_TRANSITION_MS);
     navigation.pathname = "/compras"; await mount(); expect(dialog().open).toBe(false); expect(mounts).toBe(1);
     await click("Rever apresentação"); expect(dialog().open).toBe(true); await tick(900); await tick(600_000); expect(title()).toBeUndefined();
     await click("Conheça"); expect(title()).toBe("olá.");
   });
   it("rever e continuar preserva a importação, parâmetros e identidade da sessão", async () => {
     window.localStorage.setItem(PRESENTATION_KEY, "seen"); await mount();
-    await tick(250); await tick(950); await tick(850);
+    await tick(250); await tick(950); await tick(SCENE_TRANSITION_MS);
     const files = importFixture(), operation = validateImport(files, assignmentsFor(files), syntheticParameters()).operation!;
     await act(async () => { session.commit(operation, session.getSnapshot().revision); });
     const before = session.getSnapshot();
     await click("Rever apresentação"); await lastScene();
     expect(container.textContent).toContain("Continuar operação ativa");
-    await click("Continuar operação ativa"); await tick(850);
+    await click("Continuar operação ativa"); await tick(SCENE_TRANSITION_MS);
     expect(session.getSnapshot()).toBe(before); expect(session.getSnapshot().operation).toBe(operation);
     expect(mounts).toBe(1); expect(window.localStorage.length).toBe(1); expect(fetch).not.toHaveBeenCalled();
   });
@@ -223,19 +443,20 @@ describe("experiência de apresentação", () => {
     await mount(); await click("Conheça");
     const start = [...dialog().querySelectorAll("button")].find((b) => b.textContent?.includes("Começar"))!;
     await act(async () => { start.click(); start.click(); dialog().dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })); });
-    expect(title()).toBe("o próximo movimento começa aqui.");
+    expect(title()).toBe(PRESENTATION_SCENES[1].title);
     await click("Pular apresentação"); await click("Rever apresentação"); await click("Conheça");
     expect(title()).toBe("olá."); expect(dialog().querySelectorAll(".presentation-scene")).toHaveLength(1);
     expect(errors.mock.calls.flat().map(String).join(" ")).not.toMatch(/same key|unique.*key/i);
   });
   it("teclado navega, limita as cenas e Escape encerra sem modificar a fonte", async () => {
     await mount();
-    const key = async (value: string) => { await act(async () => { dialog().dispatchEvent(new KeyboardEvent("keydown", { key: value, bubbles: true })); }); if (container.querySelector(".outgoing")) await tick(850); };
+    const key = async (value: string) => { await act(async () => { dialog().dispatchEvent(new KeyboardEvent("keydown", { key: value, bubbles: true })); }); if (container.querySelector(".outgoing")) await tick(SCENE_TRANSITION_MS); };
     await key("ArrowRight"); expect(title()).toBeUndefined();
     await click("Conheça"); await key("ArrowLeft"); expect(title()).toBe("olá.");
     for (let i = 0; i < 8; i++) await key("ArrowRight"); expect(title()).toBe("como deseja começar?");
-    await key("ArrowLeft"); expect(title()).toBe("como funciona.");
+    await key("ArrowLeft"); expect(title()).toBe(PRESENTATION_SCENES[3].title);
     await act(async () => { dialog().dispatchEvent(new Event("cancel", { cancelable: true })); });
+    await tick(120);
     expect(dialog().open).toBe(false); expect(session.getSnapshot().source).toBe("demo");
   });
   it("reduced-motion mantém avanço manual sem expansão ou handoff animado", async () => {
@@ -269,7 +490,7 @@ describe("experiência de apresentação", () => {
   });
   it("devolve foco ao controle de origem após rever e pular", async () => {
     window.localStorage.setItem(PRESENTATION_KEY, "seen"); await mount();
-    await tick(250); await tick(950); await tick(850);
+    await tick(250); await tick(950); await tick(SCENE_TRANSITION_MS);
     const replay = container.querySelector<HTMLButtonElement>(".presentation-replay")!; replay.focus();
     await click("Rever apresentação"); await click("Conheça");
     expect(document.activeElement?.id).toBe("presentation-title");
@@ -307,5 +528,5 @@ it("reduced-motion mantém as cinco cenas e ambas as escolhas disponíveis", asy
   expect([...container.querySelectorAll(".presentation-choice")].map((b) => b.textContent)).toEqual([
     expect.stringContaining("Explorar ambiente demonstrativo"), expect.stringContaining("Analisar operação local"),
   ]);
-  await click("Voltar"); expect(title()).toBe("como funciona.");
+  await click("Voltar"); expect(title()).toBe(PRESENTATION_SCENES[3].title);
 });

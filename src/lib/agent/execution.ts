@@ -66,6 +66,6 @@ export async function executeDemoAgent(prompt: string, client: Groq, model: stri
   // LLM prose is deliberately not displayed: every numeric statement comes from the engine.
   return { source: "demo", model, tool: { name: AGENT_TOOL, arguments: args, executedAt },
     referenceDate: parameters.referenceDate, horizonStart: parameters.horizonStart, horizonEnd: parameters.horizonEnd,
-    budget: plan.budget, proposals: plan.proposals, alerts: plan.alerts.slice(0, 20).map((a) => (a.sku ? a.sku + " · " : "") + a.message), alertCount: plan.alerts.length,
+    budget: plan.budget, proposals: plan.proposals, alerts: plan.alerts.map((a) => (a.sku ? a.sku + " · " : "") + a.message), alertDetails: plan.alerts, alertCount: plan.alerts.length,
     limitations: plan.limitations, explanation: `${formatNumber(plan.proposals.length)} rascunhos calculados por ${AGENT_TOOL}. Orçamento ${formatMoney(plan.budget.totalCents)}; aquisição ${formatMoney(plan.budget.usedCents)}; saldo ${formatMoney(plan.budget.remainingCents)}. Benefícios e chegadas são estimativas condicionais. Pendências não são recebimentos. Nenhuma compra foi executada.` };
 }

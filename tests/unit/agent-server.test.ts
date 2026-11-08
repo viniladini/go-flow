@@ -33,9 +33,21 @@ const input = (changes: Record<string, unknown> = {}) => ({ source: "demo", requ
 function request(body: unknown, method = "POST", origin = "http://localhost:3000", cookie = "goflow-demo-session=" + "a".repeat(64)) {
   return new Request("http://localhost:3000/api/agente", { method, headers: { origin, cookie, "content-type": "application/json" }, body: JSON.stringify(body) });
 }
-beforeEach(() => { vi.spyOn(console, "warn").mockImplementation(() => {}); });
-afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+beforeEach(() => { vi.setSystemTime(new Date("2026-11-08T15:00:00Z")); vi.spyOn(console, "warn").mockImplementation(() => {}); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 describe("orquestração real via SDK oficial com API mockada", () => {
+  it("preserva todas as ressalvas do catalogo sem cortar em vinte e mantem revisao assinada", async () => {
+    const { handlers } = setup([completion(true, JSON.stringify({ budgetCents: 12500000, skuCodes: [] })), completion(false)]);
+    const response = await handlers.POST(request(input()));
+    expect(response.status).toBe(200);
+    const receipt = await response.json() as AgentReceipt;
+    expect(receipt.action.alertCount).toBeGreaterThan(20);
+    expect(receipt.action.alerts).toHaveLength(receipt.action.alertCount);
+    expect(receipt.action.alertDetails).toHaveLength(receipt.action.alertCount);
+    expect(receipt.action.referenceDate).toBe("2026-11-08");
+    const review = await handlers.PATCH(request({ source: "demo", id: receipt.action.id, reviewToken: receipt.reviewToken, decision: "approve" }, "PATCH"));
+    expect(review.status).toBe(200);
+  }, 15000);
   it("payload serializado do GPT-OSS 20B preserva tool calling sem modos incompativeis", async () => {
     const { handlers, bodies, fetchMock } = setup(undefined, "openai/gpt-oss-20b");
     const result = await handlers.POST(request(input()));
@@ -384,6 +396,19 @@ describe("retry limitado de tool_use_failed", () => {
 });
 
 describe("isolamento serverless de comprovantes", () => {
+  it("novas propostas capturam o dia atual sem reescrever o comprovante anterior", async () => {
+    const { handlers } = setup([completion(), completion(false), completion(), completion(false)]);
+    vi.setSystemTime(new Date("2026-11-08T02:59:00Z"));
+    const first = await (await handlers.POST(request(input()))).json() as AgentReceipt;
+    vi.setSystemTime(new Date("2026-11-08T03:01:00Z"));
+    const second = await (await handlers.POST(request(input()))).json() as AgentReceipt;
+    expect(first.action.referenceDate).toBe("2026-11-07");
+    expect(second.action.referenceDate).toBe("2026-11-08");
+    const reviewed = await handlers.PATCH(request({ source: "demo", id: first.action.id, reviewToken: first.reviewToken, decision: "approve" }, "PATCH"));
+    expect(reviewed.status).toBe(200);
+    expect((await reviewed.json()).action.referenceDate).toBe("2026-11-07");
+    expect(first.action.referenceDate).toBe("2026-11-07");
+  });
   it("producao com WAF direto executa e revisa sem chamada ao Firewall SDK", async () => {
     vi.stubEnv("NODE_ENV", "production"); vi.stubEnv("VERCEL", "1");
     vi.stubEnv("VERCEL_REGION", "iad1"); vi.stubEnv("VERCEL_URL", "fixture.vercel.app");

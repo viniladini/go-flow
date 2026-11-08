@@ -25,7 +25,7 @@ somente por módulos com `import "server-only"`. Nunca use NEXT_PUBLIC para a ch
    estoque, lead time, pendências e orçamento. O gerador é o mesmo da operação demo.
 5. Um resumo limitado e exclusivamente sintético retorna como mensagem `role: tool`.
    A segunda chamada confirma a conclusão, com novas ferramentas desativadas.
-6. Somente depois das duas chamadas e dos cálculos válidos o servidor emite
+6. Somente depois das duas etapas válidas de IA (até três chamadas com retry) e dos cálculos válidos o servidor emite
    um comprovante assinado da execução, vinculado à sessão do navegador.
    O provider valida a resposta e adiciona a proposta à Central em memória.
    Falhas não geram comprovante nem mensagem de sucesso.
@@ -75,8 +75,8 @@ O formulário demo avisa para não incluir informação privada: texto livre nã
 classificador universal capaz de identificar todo conteúdo confidencial colado manualmente.
 
 Limites: mil caracteres, quatro KiB para solicitação, 256 KiB para revisão,
-comprovante expandido de até um MiB, argumentos de dois KiB, uma ferramenta e duas
-chamadas de IA. Leitura limitada a cinco segundos, SDK sem retries, quinze segundos
+comprovante expandido de até um MiB, argumentos de dois KiB, uma ferramenta e até três
+chamadas de IA (no máximo um retry de tool_use_failed por execução). Leitura limitada a cinco segundos, SDK sem retries, quinze segundos
 por chamada, trinta segundos de execução e rota Node com maxDuration de quarenta.
 A deduplicação de UUIDs, dez solicitações/minuto e uma execução simultânea por
 processo são apenas proteções locais suplementares, sem garantia entre instâncias.

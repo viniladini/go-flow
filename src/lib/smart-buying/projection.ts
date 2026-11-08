@@ -9,14 +9,22 @@ export function campaignAt(date: string, config?: BuyingConfig): Campaign | null
   return null;
 }
 export function scenarioCalendar(dailyProxy: number, config: BuyingConfig): DemandDay[] {
-  const rate = BigInt(toMicro(dailyProxy));
+  toMicro(dailyProxy); // Validate before building the calendar.
+  let weightedDaysBps = 0, previousMicro = 0;
   const result: DemandDay[] = [];
   // Bridge consumes the known closing balance after BASE, but is not counted in the 90-day objective.
   for (let date = shiftDate(config.referenceDate, 1); date <= config.horizonEnd; date = shiftDate(date, 1)) {
     const campaign = campaignAt(date, config);
     const bps = campaign === "black_friday" ? config.scenario.blackFridayMultiplierBps :
       campaign === "christmas" ? config.scenario.christmasMultiplierBps : 10000;
-    result.push({ date, campaign, microUnits: safeNumber((rate * BigInt(bps) + BigInt(5000)) / BigInt(10000)) });
+    // Quantize the cumulative demand, not the daily average. Otherwise a repeating
+    // fraction (e.g. 64/30) accumulates the same rounding residue on every day.
+    weightedDaysBps += bps;
+    const cumulativeDemand = dailyProxy * weightedDaysBps / 10000;
+    if (!Number.isSafeInteger(weightedDaysBps) || !Number.isSafeInteger(Math.round(cumulativeDemand * MICRO_UNITS))) throw new Error("Demanda acumulada fora do intervalo inteiro seguro.");
+    const cumulativeMicro = toMicro(cumulativeDemand);
+    result.push({ date, campaign, microUnits: cumulativeMicro - previousMicro });
+    previousMicro = cumulativeMicro;
   }
   return result;
 }

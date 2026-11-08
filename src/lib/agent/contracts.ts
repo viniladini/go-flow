@@ -13,6 +13,7 @@ export interface AgentAction {
   budget: BuyingResult["budget"]; proposals: PurchaseProposal[];
   status: ReviewStatus; reviewedAt: string | null;
   explanation: string; limitations: string[]; alerts: string[]; alertCount: number;
+  alertDetails?: BuyingResult["alerts"];
 }
 export interface AgentReceipt { action: AgentAction; reviewToken: string }
 export interface AgentRequest { source: "demo"; requestId: string; prompt: string }
