@@ -81,71 +81,66 @@ por chamada, trinta segundos de execução e rota Node com maxDuration de quaren
 A deduplicação de UUIDs, dez solicitações/minuto e uma execução simultânea por
 processo são apenas proteções locais suplementares, sem garantia entre instâncias.
 
-### Proteção obrigatória na Vercel
+### Protecao obrigatoria na Vercel
 
-Em produção o servidor exige Vercel, região iad1 (fixada em vercel.json), hostname
-da plataforma e uma única regra publicada do SDK oficial @vercel/firewall,
-compatível com o plano Hobby:
-- Rate Limit ID: `goflow-agent-global` (mantido para reutilizar a regra existente).
-- Chave: IP do visitante fornecido pela Vercel em `x-real-ip`, passado explicitamente
-  como `rateLimitKey`; apesar do nome histórico, o bucket agora é por IP.
-- Configuração existente confirmada no painel: trinta solicitações por sessenta segundos,
-  Fixed Window e ação de bloqueio/429, sem condições adicionais de bypass.
-  Keys: API controlled. Manter a regra existente; o SDK não configura esse valor.
-  Não é necessário criar nem consultar `goflow-agent-ip`.
+A producao usa WAF direto na borda, aplicado ao caminho `/api/agente`, com
+Fixed Window de 10 requisicoes por 60 segundos e bloqueio/429. O limite e a chave
+por visitante sao configurados na regra externa da Vercel (por IP quando assim
+configurada); o codigo nao escolhe o bucket nem chama `checkRateLimit()`.
+Nao ha dependencia operacional de Rate Limit ID, API controlled ou chamada
+`/.well-known/vercel/rate-limit-api/`. Nao alterar a regra ja validada para
+reintroduzir a condicao do SDK.
 
-Esses valores são limites públicos de proteção, não parâmetros operacionais.
-Cada verificação tem timeout de 1,5 segundo. Regra ausente, erro, timeout, plataforma
-ou região inesperada, IP ausente ou resposta inconclusiva bloqueiam a IA com 503
-antes do SDK Groq; limite retorna 429. Apenas host validado e IP da plataforma são
-encaminhados; cookies e chaves arbitrárias do cliente não definem o bucket.
-Nenhum booleano de ambiente habilita bypass de produção. Desenvolvimento local
-continua funcional com proteção local; `next start` fora da Vercel bloqueia a IA.
+Configurar no servidor, no ambiente Production:
 
-Os contadores WAF são regionais, não um limite mundial de gastos. Manter a região
-única e validar a regra no ambiente de avaliação antes de publicar. IP compartilhado
-(NAT/proxy) divide o mesmo bucket; troca de IP permite outro bucket. Não há um
-limite agregado entre visitantes, nem identidade autenticada por pessoa. Não foi
-adicionado contador em memória como substituto do WAF. Configurar
-também limites de consumo na conta Groq. Regras apenas em log/não ativas não provam
-proteção: teste efetivo de 429 é requisito de release. A configuração externa não
-foi realizada automaticamente nesta auditoria.
+```text
+AGENT_RATE_LIMIT_MODE=vercel_edge_waf
+```
 
-Referência: [Vercel Firewall SDK](https://vercel.com/docs/vercel-firewall/vercel-waf/rate-limiting-sdk).
+Ausencia ou qualquer outro valor bloqueia a execucao da IA com
+`PROTECTION_UNAVAILABLE`/503 antes de criar o cliente Groq. Permanecem as
+pre-condicoes existentes: VERCEL=1, VERCEL_REGION=iad1, VERCEL_URL valido da
+plataforma e x-real-ip presente. As variaveis Vercel sao fornecidas pela
+plataforma; manter sua exposicao habilitada. GROQ_API_KEY e GROQ_MODEL continuam
+obrigatorias somente no servidor, nunca NEXT_PUBLIC. Desenvolvimento local
+mantem o comportamento anterior; next start fora da Vercel bloqueia a IA.
 
-#### Diagnóstico de proteção indisponível
+**Limitacao:** AGENT_RATE_LIMIT_MODE declara a configuracao, nao comprova que o
+WAF existe, esta ativo ou cobre todos os dominios e metodos. Com a variavel
+correta e a regra removida, o codigo nao detecta a perda de protecao externa.
+A seguranca depende de manter a regra publicada e efetiva para `/api/agente`
+em todos os acessos publicos, sem bypass. Testar POST e preservar a cobertura
+das revisoes PATCH; nao restringir a regra a requisicoes ja validas. Nenhum
+contador em memoria foi adicionado ou usado como substituto do WAF. As protecoes
+locais suplementares existentes permanecem sem garantia entre instancias.
 
-O SDK instalado é `@vercel/firewall` 1.2.6. A chamada aceita `headers`,
-`rateLimitKey` e `timeout`. HTTP 204 retorna `{ rateLimited: false }` e libera a
-verificação; 429 retorna limite atingido; 403 retorna `blocked`; 404 retorna
-`not-found`. Outros status lançam exceção. A rota usa runtime Node.js; o SDK
-requer fetch, Web Crypto e AbortSignal.timeout, disponíveis no Node compatível.
+IPs compartilhados podem dividir o bucket e trocar IP pode permitir outro
+bucket. Contadores WAF sao regionais, nao um teto agregado de gastos; manter
+limites de consumo tambem na Groq. O teste externo de 403 seguido de 429 foi
+informado pelo responsavel; nao foi repetido neste hotfix, nem houve deploy ou
+alteracao da regra pelo agente.
 
-Sem acesso aos logs da implantação não é possível atribuir o 503 a uma causa
-externa específica. Buscar `event: agent_protection` nos logs da função:
+#### Interpretar HTTP 403 e 429
 
-| reason | Significado / verificação |
-| --- | --- |
-| rule_not_found | O endpoint do SDK respondeu 404; conferir ID e regra publicada no projeto/host consultado. |
-| sdk_integration_error | Exceção do SDK ou status inesperado; `upstreamStatus` 401/3xx indica autenticação/redirecionamento, não regra ausente. |
-| infrastructure_http | Resposta HTTP 5xx do endpoint de rate limit; status numérico registrado. |
-| infrastructure_timeout / infrastructure_network | Timeout de 1,5 s ou fetch com falha de rede; preservar bloqueio. |
-| rate_limited | SDK recebeu 429: limite atingido, sem chamada Groq. |
-| firewall_blocked | SDK recebeu 403: bloqueio do firewall; não prova que o contador foi excedido. |
-| sdk_invalid_response | Retorno fora do contrato; não tratar como permissão. |
-| platform_unavailable / region_mismatch / host_unavailable / ip_unavailable / runtime_unavailable | Pré-condição local falhou antes da consulta; conferir variáveis de sistema, região iad1, IP da plataforma e runtime. |
+O aplicativo retorna 403/ORIGIN quando Origin esta ausente/incorreto ou a
+requisicao e cross-site, e 403/DEMO_ONLY quando a fonte nao e demo. Essas
+validacoes ocorrem antes da protecao de producao e antes da Groq. Um POST
+invalido pode, portanto, retornar 403 pela propria aplicacao, sem participacao
+do antigo SDK. Verificar o codigo JSON sanitizado da resposta para distinguir
+casos locais. O WAF tambem pode negar com 403; confirmar a origem desse bloqueio
+nos eventos do Firewall, nao apenas pelo status HTTP.
 
-O host consultado é VERCEL_URL, não um host arbitrário enviado pelo cliente.
-Expor as variáveis de sistema na Vercel é necessário. Em Preview, a documentação
-do SDK também exige Protection Bypass for Automation; o SDK lê automaticamente
-VERCEL_AUTOMATION_BYPASS_SECRET. Um host com Deployment Protection pode exigir
-esse acesso mesmo quando o domínio público está acessível. Confirmar pelo status
-e configuração da implantação antes de alterar qualquer requisito externo.
+O 429 da borda e emitido pela regra antes do handler. A aplicacao tambem mantem
+seus 429 locais suplementares e o tratamento de 429 da Groq; o status sozinho
+nao identifica qual camada bloqueou. Nao transformar falha de validacao em
+sucesso nem interpretar todo 403 como quota excedida.
 
-Os logs contêm apenas evento, categoria fixa e, quando reconhecido, status HTTP
-numérico. Não incluem IP, host, headers, cookies, prompts, segredos, stack ou
-mensagens originais de erro. O fail-closed permanece; não houve mudança na regra
-nem validação de sua integração real em produção.
+Os logs `event: agent_protection` agora registram somente falhas locais com
+categorias fixas: rate_limit_mode_unavailable, platform_unavailable,
+region_mismatch, host_unavailable ou ip_unavailable. Nao atestam o estado do WAF
+e nao incluem IP, host, headers, cookies, prompts, segredos ou erros originais.
+
+Referencia: [Vercel WAF Rate Limiting](https://vercel.com/docs/vercel-firewall/vercel-waf/rate-limiting).
 
 JSON, origem e tamanho são conferidos; respostas usam no-store. Timeout, 429,
 indisponibilidade, configuração ausente e falha de tool calling têm mensagens

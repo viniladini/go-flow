@@ -53,33 +53,33 @@ os literais operacionais. A verificacao adicional e obrigatoria.
 
 ### Firewall obrigatorio antes da IA publica
 
-No projeto Vercel, abrir Firewall > Configure e editar a regra existente
-`goflow-agent-global`. O plano Hobby permite uma regra WAF de rate limiting por
-projeto. Usar condicao `@vercel/firewall`, sem filtros adicionais que excluam a rota:
+Manter a regra WAF direta ja validada no caminho `/api/agente`, Fixed Window de
+10 requisicoes por 60 segundos, com bloqueio/429. A regra deve cobrir todos os
+dominios publicos e metodos do endpoint, incluindo POST e PATCH, sem bypass.
+Conferir a chave por visitante na propria regra (por IP quando configurada).
+Nao reintroduzir `@vercel/firewall`, Keys API controlled ou Rate Limit ID como
+requisito do codigo: nao existe mais consulta programatica ao SDK.
 
-| Rate Limit ID exato | Bucket do codigo | Configuracao sugerida |
-| --- | --- | --- |
-| goflow-agent-global | IP do visitante fornecido pela Vercel (`x-real-ip` como `rateLimitKey`) | 30 solicitacoes por 60 segundos; Fixed Window; Keys: API controlled; bloquear/429 |
+Configurar `AGENT_RATE_LIMIT_MODE=vercel_edge_waf` no ambiente Production.
+Valor ausente/incorreto retorna 503 antes da Groq. Preservar variaveis de sistema
+Vercel expostas (VERCEL=1, VERCEL_REGION=iad1 e VERCEL_URL valido), IP da plataforma,
+GROQ_API_KEY e GROQ_MODEL somente no servidor, sem NEXT_PUBLIC.
 
-Manter a regra existente de 30/60 no painel: o SDK nao define o limite.
-O nome historico do ID foi preservado, mas o bucket nao e mais global. Nao criar
-`goflow-agent-ip`; o endpoint consulta apenas `goflow-agent-global` uma vez.
-Salvar, Review Changes e Publish para ativar a regra do firewall.
-Nao usar apenas Log ou regras desativadas. Essa publicacao de regras e uma acao
-manual posterior; nao foi realizada pelo agente. O codigo verifica a unica regra
-via SDK oficial @vercel/firewall antes de chamar Groq. Ausencia, erro ou timeout
-retornam 503 sem chamada ao modelo; IP ausente ou resposta inconclusiva tambem
-bloqueiam. Limite efetivo retorna 429. Nao ha toggle de
-bypass. Confirmar 429 e ausencia de consumo Groq no teste da implantacao autorizada.
+A variavel declara o modo; NAO comprova existencia, ativacao ou cobertura do WAF.
+Se a regra for removida com o modo habilitado, a aplicacao nao detecta isso.
+Manter a regra efetiva e validar o 429 na borda sem consumo Groq. Nao ha contador
+em memoria adicionado como substituto da protecao externa. Contadores regionais
+nao garantem teto global de consumo; manter limites tambem na conta Groq.
 
-Os contadores sao regionais. vercel.json fixa iad1 e o servidor rejeita outra
-regiao. Manter limites de consumo tambem na conta Groq; WAF nao e um teto mundial
-de gastos. IPs compartilhados dividem o bucket; troca de IP permite outro bucket.
-Nao ha limite agregado entre visitantes nem identificacao autenticada por pessoa.
-Cookies, x-forwarded-for e chaves arbitrarias do cliente nao substituem x-real-ip.
-Nao foi adicionado rate limiting em memoria como substituto da protecao externa.
-Configurar GROQ_API_KEY e GROQ_MODEL apenas no servidor, sem NEXT_PUBLIC.
-Referencia: https://vercel.com/docs/vercel-firewall/vercel-waf/rate-limiting-sdk
+403 de POST invalido pode ser ORIGIN (origem ausente/incorreta/cross-site) ou
+DEMO_ONLY (fonte importada), ambos gerados pelo aplicativo antes da protecao.
+Consultar codigo JSON e eventos do Firewall para distinguir de um bloqueio da
+borda; nao atribuir todo 403 ao SDK antigo. O teste externo 403 seguido de 429 foi
+informado pelo responsavel; nao foi repetido automaticamente neste hotfix.
+Validar tambem uma solicitacao demo valida e revisao isolada apos implantacao
+autorizada. Nenhuma regra ou implantacao foi alterada pelo agente.
+
+Referencia: https://vercel.com/docs/vercel-firewall/vercel-waf/rate-limiting
 
 ### Pendencias de aceite
 

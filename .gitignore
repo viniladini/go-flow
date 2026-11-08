@@ -52,3 +52,5 @@ next-env.d.ts
 !.env.example
 # Vitest artifacts
 /.vitest/
+.vercel
+.env*

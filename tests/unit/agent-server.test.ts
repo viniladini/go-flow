@@ -174,6 +174,38 @@ describe("barreiras de privacidade e erros do servidor", () => {
 
 
 describe("isolamento serverless de comprovantes", () => {
+  it("producao com WAF direto executa e revisa sem chamada ao Firewall SDK", async () => {
+    vi.stubEnv("NODE_ENV", "production"); vi.stubEnv("VERCEL", "1");
+    vi.stubEnv("VERCEL_REGION", "iad1"); vi.stubEnv("VERCEL_URL", "fixture.vercel.app");
+    vi.stubEnv("AGENT_RATE_LIMIT_MODE", "vercel_edge_waf");
+    const network = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("No firewall network expected"));
+    const { handlers, fetchMock } = setup();
+    const make = (body: unknown, method = "POST", cookie = "") => new Request("https://fixture.vercel.app/api/agente", {
+      method, headers: { origin: "https://fixture.vercel.app", "x-real-ip": "192.0.2.1", "content-type": "application/json", cookie }, body: JSON.stringify(body),
+    });
+    const response = await handlers.POST(make(input()));
+    expect(response.status).toBe(200);
+    const receipt = await response.json() as AgentReceipt;
+    expect(receipt.action.source).toBe("demo");
+    expect(receipt.reviewToken).toBeTruthy();
+    const cookie = response.headers.get("set-cookie")!.split(";")[0];
+    const review = { source: "demo", id: receipt.action.id, reviewToken: receipt.reviewToken, decision: "approve" };
+    expect((await handlers.PATCH(make(review, "PATCH"))).status).toBe(404);
+    expect((await handlers.PATCH(make(review, "PATCH", cookie))).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(network).not.toHaveBeenCalled();
+  });
+  it.each(["missing-origin", "cross-origin", "imported-source"])("403 de validacao nao depende do SDK: %s", async (scenario) => {
+    const { handlers, fetchMock } = setup();
+    const headers = new Headers({ "content-type": "application/json" });
+    if (scenario !== "missing-origin") headers.set("origin", scenario === "cross-origin" ? "https://external.invalid" : "http://localhost:3000");
+    const response = await handlers.POST(new Request("http://localhost:3000/api/agente", {
+      method: "POST", headers, body: JSON.stringify(input(scenario === "imported-source" ? { source: "imported_local" } : {})),
+    }));
+    expect(response.status).toBe(403);
+    expect((await response.json()).error.code).toBe(scenario === "imported-source" ? "DEMO_ONLY" : "ORIGIN");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
   it("producao sem protecao distribuida nao inicia chamadas Groq", async () => {
     vi.stubEnv("NODE_ENV", "production"); vi.stubEnv("VERCEL", "");
     const { handlers, fetchMock } = setup();
