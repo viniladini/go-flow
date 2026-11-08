@@ -59,9 +59,9 @@ projeto. Usar condicao `@vercel/firewall`, sem filtros adicionais que excluam a 
 
 | Rate Limit ID exato | Bucket do codigo | Configuracao sugerida |
 | --- | --- | --- |
-| goflow-agent-global | IP do visitante fornecido pela Vercel (`x-real-ip` como `rateLimitKey`) | 10 solicitacoes por 60 segundos; Fixed Window; bloquear/429 |
+| goflow-agent-global | IP do visitante fornecido pela Vercel (`x-real-ip` como `rateLimitKey`) | 30 solicitacoes por 60 segundos; Fixed Window; Keys: API controlled; bloquear/429 |
 
-Reduzir a regra existente de 30/60 para 10/60 no painel: o SDK nao define o limite.
+Manter a regra existente de 30/60 no painel: o SDK nao define o limite.
 O nome historico do ID foi preservado, mas o bucket nao e mais global. Nao criar
 `goflow-agent-ip`; o endpoint consulta apenas `goflow-agent-global` uma vez.
 Salvar, Review Changes e Publish para ativar a regra do firewall.

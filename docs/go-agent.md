@@ -89,9 +89,9 @@ compatível com o plano Hobby:
 - Rate Limit ID: `goflow-agent-global` (mantido para reutilizar a regra existente).
 - Chave: IP do visitante fornecido pela Vercel em `x-real-ip`, passado explicitamente
   como `rateLimitKey`; apesar do nome histórico, o bucket agora é por IP.
-- Configuração conservadora no painel: dez solicitações por sessenta segundos,
+- Configuração existente confirmada no painel: trinta solicitações por sessenta segundos,
   Fixed Window e ação de bloqueio/429, sem condições adicionais de bypass.
-  Ajustar a regra existente de 30/60 para 10/60; o SDK não configura esse valor.
+  Keys: API controlled. Manter a regra existente; o SDK não configura esse valor.
   Não é necessário criar nem consultar `goflow-agent-ip`.
 
 Esses valores são limites públicos de proteção, não parâmetros operacionais.
@@ -112,6 +112,40 @@ proteção: teste efetivo de 429 é requisito de release. A configuração exter
 foi realizada automaticamente nesta auditoria.
 
 Referência: [Vercel Firewall SDK](https://vercel.com/docs/vercel-firewall/vercel-waf/rate-limiting-sdk).
+
+#### Diagnóstico de proteção indisponível
+
+O SDK instalado é `@vercel/firewall` 1.2.6. A chamada aceita `headers`,
+`rateLimitKey` e `timeout`. HTTP 204 retorna `{ rateLimited: false }` e libera a
+verificação; 429 retorna limite atingido; 403 retorna `blocked`; 404 retorna
+`not-found`. Outros status lançam exceção. A rota usa runtime Node.js; o SDK
+requer fetch, Web Crypto e AbortSignal.timeout, disponíveis no Node compatível.
+
+Sem acesso aos logs da implantação não é possível atribuir o 503 a uma causa
+externa específica. Buscar `event: agent_protection` nos logs da função:
+
+| reason | Significado / verificação |
+| --- | --- |
+| rule_not_found | O endpoint do SDK respondeu 404; conferir ID e regra publicada no projeto/host consultado. |
+| sdk_integration_error | Exceção do SDK ou status inesperado; `upstreamStatus` 401/3xx indica autenticação/redirecionamento, não regra ausente. |
+| infrastructure_http | Resposta HTTP 5xx do endpoint de rate limit; status numérico registrado. |
+| infrastructure_timeout / infrastructure_network | Timeout de 1,5 s ou fetch com falha de rede; preservar bloqueio. |
+| rate_limited | SDK recebeu 429: limite atingido, sem chamada Groq. |
+| firewall_blocked | SDK recebeu 403: bloqueio do firewall; não prova que o contador foi excedido. |
+| sdk_invalid_response | Retorno fora do contrato; não tratar como permissão. |
+| platform_unavailable / region_mismatch / host_unavailable / ip_unavailable / runtime_unavailable | Pré-condição local falhou antes da consulta; conferir variáveis de sistema, região iad1, IP da plataforma e runtime. |
+
+O host consultado é VERCEL_URL, não um host arbitrário enviado pelo cliente.
+Expor as variáveis de sistema na Vercel é necessário. Em Preview, a documentação
+do SDK também exige Protection Bypass for Automation; o SDK lê automaticamente
+VERCEL_AUTOMATION_BYPASS_SECRET. Um host com Deployment Protection pode exigir
+esse acesso mesmo quando o domínio público está acessível. Confirmar pelo status
+e configuração da implantação antes de alterar qualquer requisito externo.
+
+Os logs contêm apenas evento, categoria fixa e, quando reconhecido, status HTTP
+numérico. Não incluem IP, host, headers, cookies, prompts, segredos, stack ou
+mensagens originais de erro. O fail-closed permanece; não houve mudança na regra
+nem validação de sua integração real em produção.
 
 JSON, origem e tamanho são conferidos; respostas usam no-store. Timeout, 429,
 indisponibilidade, configuração ausente e falha de tool calling têm mensagens

@@ -10,11 +10,12 @@ vi.mock("@vercel/firewall", () => ({ checkRateLimit: vi.fn() }));
 const check = vi.mocked(checkRateLimit);
 const request = () => new Request("https://fixture.vercel.app/api/agente", { headers: { host: "untrusted.invalid", "x-real-ip": "192.0.2.1", cookie: "private=not-forwarded" } });
 beforeEach(() => {
+  vi.spyOn(console, "warn").mockImplementation(() => {});
   vi.stubEnv("NODE_ENV", "production"); vi.stubEnv("VERCEL", "1");
   vi.stubEnv("VERCEL_REGION", "iad1"); vi.stubEnv("VERCEL_URL", "fixture.vercel.app");
   check.mockResolvedValue({ rateLimited: false });
 });
-afterEach(() => { vi.unstubAllEnvs(); vi.resetAllMocks(); });
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.resetAllMocks(); });
 describe("protecao publica fail-closed", () => {
   it("consulta somente a regra Hobby por IP sem encaminhar headers arbitrarios", async () => {
     await protectAgent(request());
