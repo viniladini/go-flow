@@ -1,0 +1,38 @@
+{
+  "name": "go-flow",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "postbuild": "npm run check:dashboard-build",
+    "check:dashboard-build": "node scripts/check-dashboard-build.mts",
+    "start": "next start",
+    "lint": "eslint",
+    "data:audit": "node scripts/data-audit.mts",
+    "data:audit:test": "vitest run tests/unit/data-audit.test.mjs",
+    "test": "vitest",
+    "test:run": "vitest run"
+  },
+  "dependencies": {
+    "@vercel/firewall": "^1.2.6",
+    "groq-sdk": "^1.6.0",
+    "lucide-react": "^1.68.0",
+    "next": "16.4.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/turbopack": "^4",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.5",
+    "happy-dom": "^21.0.4",
+    "tailwindcss": "^4",
+    "typescript": "^5",
+    "vitest": "^5.1.0"
+  }
+}

@@ -1,0 +1,10 @@
+data/
+private/
+challenge-private/
+references-private/
+.env*
+!.env.example
+.git/
+.next/
+coverage/
+*.pem
