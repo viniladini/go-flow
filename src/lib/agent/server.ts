@@ -9,9 +9,38 @@ import type { AgentAction, AgentReceipt } from "./contracts";
 
 interface Config { apiKey: string; model: string }
 interface Dependencies { config?: () => Config; client?: (config: Config) => Groq; now?: () => number }
+type GroqFailure = "api_key_missing" | "model_config_invalid" | "authentication_or_permission" |
+  "model_or_parameters_incompatible" | "model_or_resource_not_found" | "provider_rate_limit" |
+  "provider_timeout" | "provider_unavailable" | "provider_connection_error" | "execution_cancelled" |
+  "tool_call_invalid" | "tool_arguments_invalid" | "tool_confirmation_invalid" | "execution_unknown";
+function logGroqFailure(reason: GroqFailure, upstreamStatus?: number) {
+  // eslint-disable-next-line no-console -- Fixed diagnostic categories/status only; no provider/request payloads.
+  console.warn(JSON.stringify({ event: "agent_groq", reason, ...(upstreamStatus === undefined ? {} : { upstreamStatus }) }));
+}
+function diagnoseGroqExecution(error: unknown, timedOut: boolean) {
+  let reason: GroqFailure = "execution_unknown";
+  const e = error as { status?: unknown; name?: unknown } | null;
+  const status = typeof e?.status === "number" && Number.isInteger(e.status) && e.status >= 400 && e.status <= 599 ? e.status : undefined;
+  if (timedOut || error instanceof Groq.APIConnectionTimeoutError || e?.name === "APIConnectionTimeoutError" || e?.name === "TimeoutError") reason = "provider_timeout";
+  else if (error instanceof AgentError) {
+    if (error.code === "INVALID_TOOL_CALL") reason = "tool_call_invalid";
+    else if (error.code === "INVALID_TOOL") reason = "tool_arguments_invalid";
+    else if (error.code === "INCOMPLETE_EXECUTION") reason = "tool_confirmation_invalid";
+  } else if (status === 401 || status === 403) reason = "authentication_or_permission";
+  else if (status === 400 || status === 422) reason = "model_or_parameters_incompatible";
+  else if (status === 404) reason = "model_or_resource_not_found";
+  else if (status === 429) reason = "provider_rate_limit";
+  else if (status !== undefined && status >= 500) reason = "provider_unavailable";
+  else if (error instanceof Groq.APIUserAbortError || e?.name === "AbortError" || e?.name === "APIUserAbortError") reason = "execution_cancelled";
+  else if (error instanceof Groq.APIConnectionError) reason = "provider_connection_error";
+  logGroqFailure(reason, error instanceof AgentError ? undefined : status);
+}
 function environment(): Config {
   const apiKey = process.env.GROQ_API_KEY?.trim(), model = process.env.GROQ_MODEL?.trim();
-  if (!apiKey || !model || model.length > 120 || !/^[\w./:-]+$/.test(model)) throw new AgentError("NOT_CONFIGURED", "Configure GROQ_API_KEY e GROQ_MODEL no servidor. Nenhuma ação foi criada.", 503);
+  if (!apiKey || !model || model.length > 120 || !/^[\w./:-]+$/.test(model)) {
+    logGroqFailure(!apiKey ? "api_key_missing" : "model_config_invalid");
+    throw new AgentError("NOT_CONFIGURED", "Configure GROQ_API_KEY e GROQ_MODEL no servidor. Nenhuma ação foi criada.", 503);
+  }
   return { apiKey, model };
 }
 function response(value: unknown, status = 200) { return Response.json(value, { status, headers: { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } }); }
@@ -66,13 +95,16 @@ export function createAgentHandlers(dependencies: Dependencies = {}) {
   };
   return {
     POST: async (request: Request): Promise<Response> => {
-      let timer: ReturnType<typeof setTimeout> | undefined, ownsExecution = false, timedOut = false;
+      let timer: ReturnType<typeof setTimeout> | undefined, ownsExecution = false, timedOut = false, executingGroq = false;
       const controller = new AbortController();
       const abort = () => controller.abort();
       try {
         const input = parseAgentRequest(await readRequest(request));
         const config = (dependencies.config ?? environment)();
-        if (!config.apiKey || !config.model) throw new AgentError("NOT_CONFIGURED", "Configuração do servidor incompleta.", 503);
+        if (!config.apiKey || !config.model) {
+          logGroqFailure(!config.apiKey ? "api_key_missing" : "model_config_invalid");
+          throw new AgentError("NOT_CONFIGURED", "Configuração do servidor incompleta.", 503);
+        }
         await protectAgent(request);
         cleanup();
         if (usedRequests.has(input.requestId)) throw new AgentError("DUPLICATE", "Solicitação já recebida. Confira a Central de Ações ou inicie uma nova solicitação.", 409);
@@ -82,9 +114,11 @@ export function createAgentHandlers(dependencies: Dependencies = {}) {
         if (request.signal.aborted) controller.abort();
         timer = setTimeout(() => { timedOut = true; controller.abort(); }, AGENT_LIMITS.timeoutMs);
         controller.signal.throwIfAborted();
+        executingGroq = true;
         const client = dependencies.client ? dependencies.client(config) : new Groq({ apiKey: config.apiKey, baseURL: "https://api.groq.com", maxRetries: 0, timeout: 15000, logLevel: "off" });
         const result = await executeDemoAgent(input.prompt, client, config.model, controller.signal);
         controller.signal.throwIfAborted();
+        executingGroq = false;
         const timestamp = now(), id = randomUUID();
         const action: AgentAction = { ...result, id, createdAt: new Date(timestamp).toISOString(), expiresAt: new Date(timestamp + AGENT_LIMITS.ttlMs).toISOString(),
           status: result.proposals.length ? "pending_review" : "no_proposal", reviewedAt: null };
@@ -92,7 +126,7 @@ export function createAgentHandlers(dependencies: Dependencies = {}) {
         const resultResponse = response({ action, reviewToken: signAction(action, session.id, config.apiKey) } satisfies AgentReceipt);
         resultResponse.headers.set("Set-Cookie", session.cookie);
         return resultResponse;
-      } catch (error) { return errorResponse(error, timedOut); }
+      } catch (error) { if (executingGroq) diagnoseGroqExecution(error, timedOut); return errorResponse(error, timedOut); }
       finally { if (timer) clearTimeout(timer); request.signal.removeEventListener("abort", abort); if (ownsExecution) active = false; }
     },
     PATCH: async (request: Request): Promise<Response> => {

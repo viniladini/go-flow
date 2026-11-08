@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Groq from "groq-sdk";
+import { beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { createAgentHandlers } from "@/lib/agent/server";
 import { AGENT_TOOL } from "@/lib/agent/contracts";
@@ -31,6 +32,7 @@ const input = (changes: Record<string, unknown> = {}) => ({ source: "demo", requ
 function request(body: unknown, method = "POST", origin = "http://localhost:3000", cookie = "goflow-demo-session=" + "a".repeat(64)) {
   return new Request("http://localhost:3000/api/agente", { method, headers: { origin, cookie, "content-type": "application/json" }, body: JSON.stringify(body) });
 }
+beforeEach(() => { vi.spyOn(console, "warn").mockImplementation(() => {}); });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 describe("orquestração real via SDK oficial com API mockada", () => {
   it("chama a ferramenta, calcula, confirma, registra e permite revisão validada", async () => {
@@ -112,6 +114,65 @@ describe("orquestração real via SDK oficial com API mockada", () => {
   }, 15000);
 });
 describe("barreiras de privacidade e erros do servidor", () => {
+  it.each([
+    [401, "authentication_or_permission"], [403, "authentication_or_permission"],
+    [400, "model_or_parameters_incompatible"], [422, "model_or_parameters_incompatible"],
+    [404, "model_or_resource_not_found"], [429, "provider_rate_limit"],
+    [500, "provider_unavailable"], [503, "provider_unavailable"],
+  ])("diagnostica HTTP Groq %i sem registrar conteudo", async (status, reason) => {
+    const marker = "FIXTURE_PRIVATE_PROVIDER_CONTENT";
+    const { handlers } = setup([new Response(JSON.stringify({ error: { message: key + marker, code: marker } }), {
+      status, headers: { "x-request-id": marker },
+    })]);
+    const result = await handlers.POST(request(input({ prompt: marker })));
+    expect(result.status).toBe(status === 429 ? 429 : 503);
+    const body = await result.json();
+    expect(body.action).toBeUndefined(); expect(body.reviewToken).toBeUndefined();
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ event: "agent_groq", reason, upstreamStatus: status }));
+    expect(JSON.stringify(vi.mocked(console.warn).mock.calls) + JSON.stringify(body)).not.toContain(marker);
+    expect(JSON.stringify(vi.mocked(console.warn).mock.calls) + JSON.stringify(body)).not.toContain(key);
+  });
+  it("diagnostica erro na segunda chamada sem emitir proposta", async () => {
+    const { handlers, fetchMock } = setup([completion(), new Response('{"error":{"message":"fixture-private"}}', { status: 400 })]);
+    const result = await handlers.POST(request(input()));
+    expect(result.status).toBe(503); expect((await result.json()).action).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith('{"event":"agent_groq","reason":"model_or_parameters_incompatible","upstreamStatus":400}');
+  });
+  it.each([
+    ["", "fixture-model", "api_key_missing"],
+    ["fixture-key", "", "model_config_invalid"],
+    ["fixture-key", "invalid model", "model_config_invalid"],
+  ])("diagnostica configuracao ausente/invalida sem rede (%s, %s)", async (apiKey, configuredModel, reason) => {
+    vi.stubEnv("GROQ_API_KEY", apiKey); vi.stubEnv("GROQ_MODEL", configuredModel);
+    const client = vi.fn();
+    const result = await createAgentHandlers({ client }).POST(request(input()));
+    expect(result.status).toBe(503); expect((await result.json()).error.code).toBe("NOT_CONFIGURED");
+    expect(client).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ event: "agent_groq", reason }));
+  });
+  it.each([
+    [new DOMException("fixture-private", "TimeoutError"), "provider_timeout", 504],
+    [new DOMException("fixture-private", "AbortError"), "execution_cancelled", 408],
+    [new Error("fixture-private"), "execution_unknown", 503],
+  ])("diagnostica excecoes sem copiar mensagem (%s)", async (error, reason, status) => {
+    const client = { chat: { completions: { create: vi.fn().mockRejectedValue(error) } } } as unknown as Groq;
+    const result = await createAgentHandlers({ config: () => ({ apiKey: key, model }), client: () => client }).POST(request(input()));
+    expect(result.status).toBe(status); expect((await result.json()).action).toBeUndefined();
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ event: "agent_groq", reason }));
+  });
+  it.each([
+    ["shape", "tool_call_invalid", 422],
+    ["arguments", "tool_arguments_invalid", 422],
+    ["confirmation", "tool_confirmation_invalid", 502],
+  ])("identifica falha de interpretacao de tool calls: %s", async (kind, reason, status) => {
+    const malformed = () => new Response('{"fixture":"private"}', { status: 200, headers: { "content-type": "application/json" } });
+    const responses = kind === "confirmation" ? [completion(), malformed()] : kind === "arguments" ? [completion(true, "{fixture-private")] : [malformed()];
+    const { handlers } = setup(responses);
+    const result = await handlers.POST(request(input()));
+    expect(result.status).toBe(status); expect((await result.json()).action).toBeUndefined();
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ event: "agent_groq", reason }));
+  });
   it.each([
     input({ source: "imported_local", prompt: "CONTEUDO_SINTETICO_PRIVADO" }),
     input({ dataset: { sku: "CONTEUDO_SINTETICO_PRIVADO" } }), input({ parameters: { budgetCents: 123 } }),

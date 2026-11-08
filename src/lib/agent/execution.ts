@@ -21,8 +21,8 @@ export async function executeDemoAgent(prompt: string, client: Groq, model: stri
   const reasoning = model.startsWith("openai/gpt-oss-") ? { reasoning_effort: "low" as const } : {};
   const first = await client.chat.completions.create({ model, messages, tools: [tool], tool_choice: { type: "function", function: { name: AGENT_TOOL } },
     parallel_tool_calls: false, store: false, temperature: 0, max_completion_tokens: 2048, ...reasoning }, { signal });
-  const choice = first.choices[0], calls = choice?.message.tool_calls;
-  if (choice?.finish_reason !== "tool_calls" || calls?.length !== 1 || calls[0].type !== "function" || calls[0].function.name !== AGENT_TOOL || !calls[0].id || calls[0].id.length > 200) throw new AgentError("INVALID_TOOL_CALL", "O modelo não devolveu uma única chamada operacional válida. Nenhuma ação foi criada.", 422);
+  const choice = first?.choices?.[0], calls = choice?.message?.tool_calls;
+  if (choice?.finish_reason !== "tool_calls" || !Array.isArray(calls) || calls.length !== 1 || calls[0]?.type !== "function" || calls[0]?.function?.name !== AGENT_TOOL || typeof calls[0].id !== "string" || !calls[0].id || calls[0].id.length > 200) throw new AgentError("INVALID_TOOL_CALL", "O modelo não devolveu uma única chamada operacional válida. Nenhuma ação foi criada.", 422);
   const call = calls[0], args = parseToolArguments(call.function.arguments, parameters.budgetCents, new Set(dataset.skus.map((s) => s.sku)));
   signal.throwIfAborted();
   const selected = new Set(args.skuCodes), all = selected.size === 0;
@@ -38,7 +38,8 @@ export async function executeDemoAgent(prompt: string, client: Groq, model: stri
     { role: "tool", tool_call_id: call.id, content: JSON.stringify(toolSummary) },
     { role: "system", content: "Confirme brevemente a conclusão da ferramenta, sem propor outras operações. A aplicação exibirá os números exclusivamente do resultado determinístico, não do seu texto." }],
     tools: [tool], tool_choice: "none", parallel_tool_calls: false, store: false, temperature: 0, max_completion_tokens: 1024, ...reasoning }, { signal });
-  if (second.choices[0]?.finish_reason !== "stop" || second.choices[0]?.message.tool_calls?.length || !second.choices[0]?.message.content?.trim()) throw new AgentError("INCOMPLETE_EXECUTION", "A confirmação da ferramenta não foi concluída. Nenhuma ação foi registrada.", 502);
+  const confirmation = second?.choices?.[0];
+  if (confirmation?.finish_reason !== "stop" || confirmation?.message?.tool_calls?.length || typeof confirmation?.message?.content !== "string" || !confirmation.message.content.trim()) throw new AgentError("INCOMPLETE_EXECUTION", "A confirmação da ferramenta não foi concluída. Nenhuma ação foi registrada.", 502);
   signal.throwIfAborted();
   // LLM prose is deliberately not displayed: every numeric statement comes from the engine.
   return { source: "demo", model, tool: { name: AGENT_TOOL, arguments: args, executedAt },
