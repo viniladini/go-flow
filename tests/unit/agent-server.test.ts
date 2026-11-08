@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import Groq from "groq-sdk";
 import { beforeEach } from "vitest";
 import { randomUUID } from "node:crypto";
+import * as buying from "@/lib/smart-buying/index";
 import { createAgentHandlers } from "@/lib/agent/server";
 import { AGENT_TOOL } from "@/lib/agent/contracts";
 import type { AgentReceipt } from "@/lib/agent/contracts";
@@ -145,7 +146,8 @@ describe("barreiras de privacidade e erros do servidor", () => {
     [{ error: { code: { private: "fixture-private" }, type: ["fixture-private"], param: "x".repeat(10000) } }, { code: "redacted", type: "redacted", param: "redacted" }],
   ])("diagnostica campos estruturados do 400 por allowlist, sem mensagens brutas", async (errorBody, providerError) => {
     const body = { ...errorBody, message: key + " fixture-private", failed_generation: "fixture-private" };
-    const { handlers } = setup([new Response(JSON.stringify(body), { status: 400 })]);
+    const failure = new Response(JSON.stringify(body), { status: 400 });
+    const { handlers } = setup([failure, failure.clone()]);
     const result = await handlers.POST(request(input({ prompt: "fixture-private" })));
     expect(result.status).toBe(503);
     const responseBody = await result.json();
@@ -274,6 +276,112 @@ describe("barreiras de privacidade e erros do servidor", () => {
   });
 });
 
+
+describe("retry limitado de tool_use_failed", () => {
+  const failure = (code = "tool_use_failed", status = 400) => new Response(JSON.stringify({ error: {
+    code, type: "invalid_request_error", message: key + " fixture-private",
+    failed_generation: JSON.stringify({ tool_calls: [{ id: "untrusted", type: "function", function: { name: AGENT_TOOL, arguments: JSON.stringify({ budgetCents: 1, skuCodes: [] }) } }] }),
+  } }), { status });
+  beforeEach(() => { vi.spyOn(buying, "createOperationalBuyingPlan"); });
+
+  it("recupera com uma nova resposta valida e registra apenas uma proposta revisavel", async () => {
+    const { handlers, fetchMock, bodies } = setup([failure(), completion(), completion(false)], "openai/gpt-oss-20b");
+    const body = input();
+    const response = await handlers.POST(request(body));
+    expect(response.status).toBe(200);
+    const receipt = await response.json() as AgentReceipt;
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(bodies.map((body) => body.temperature)).toEqual([0.2, 0, 0]);
+    expect(bodies[1]).toEqual({ ...bodies[0], temperature: 0 });
+    expect(JSON.stringify(bodies)).not.toMatch(/failed_generation|untrusted|fixture-private/);
+    expect(receipt.action.tool.arguments).toEqual(args);
+    expect(buying.createOperationalBuyingPlan).toHaveBeenCalledTimes(1);
+    expect((await handlers.PATCH(request({ source: "demo", id: receipt.action.id, reviewToken: receipt.reviewToken, decision: "approve" }, "PATCH"))).status).toBe(200);
+    expect((await handlers.POST(request(body))).status).toBe(409);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+  it("falha persistente nao executa failed_generation nem emite comprovante", async () => {
+    const { handlers, fetchMock, bodies } = setup([failure(), failure(), completion()]);
+    const response = await handlers.POST(request(input()));
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body.action).toBeUndefined(); expect(body.reviewToken).toBeUndefined();
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(buying.createOperationalBuyingPlan).not.toHaveBeenCalled();
+    expect(console.warn).toHaveBeenCalledExactlyOnceWith('{"event":"agent_groq","reason":"model_or_parameters_incompatible","upstreamStatus":400,"providerError":{"code":"tool_use_failed","type":"invalid_request_error"}}');
+    expect(JSON.stringify(vi.mocked(console.warn).mock.calls) + JSON.stringify(body) + JSON.stringify(bodies)).not.toMatch(/fixture-private|failed_generation|untrusted/);
+  });
+  it("resposta invalida apos retry nao inicia calculo nem uma terceira tentativa", async () => {
+    const { handlers, fetchMock } = setup([failure(), completion(true, "{invalid"), completion()]);
+    const response = await handlers.POST(request(input()));
+    expect(response.status).toBe(422); expect((await response.json()).action).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(buying.createOperationalBuyingPlan).not.toHaveBeenCalled();
+  });
+  it("retry da confirmacao nao repete o calculo", async () => {
+    const { handlers, fetchMock, bodies } = setup([completion(), failure(), completion(false)]);
+    const response = await handlers.POST(request(input()));
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(bodies.map((body) => body.temperature)).toEqual([0.2, 0.2, 0]);
+    expect(bodies[2]).toEqual({ ...bodies[1], temperature: 0 });
+    expect(buying.createOperationalBuyingPlan).toHaveBeenCalledTimes(1);
+  });
+  it("budget de retry e compartilhado entre chamada da ferramenta e confirmacao", async () => {
+    const { handlers, fetchMock } = setup([failure(), completion(), failure(), completion(false)]);
+    const response = await handlers.POST(request(input()));
+    expect(response.status).toBe(503); expect((await response.json()).action).toBeUndefined();
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(buying.createOperationalBuyingPlan).toHaveBeenCalledTimes(1);
+  });
+  it.each([["invalid_request_error", 400], ["tool_use_failed", 422], ["tool_use_failed", 429], ["tool_use_failed", 500]])("nao repete outro erro: %s HTTP %i", async (code, status) => {
+    const { handlers, fetchMock } = setup([failure(code, status), completion()]);
+    const response = await handlers.POST(request(input()));
+    expect(response.status).toBe(status === 429 ? 429 : 503);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(buying.createOperationalBuyingPlan).not.toHaveBeenCalled();
+  });
+  it("cancelamento antes do retry impede nova chamada e efeitos colaterais", async () => {
+    const controller = new AbortController();
+    const error = new Groq.BadRequestError(400, { error: { code: "tool_use_failed" } }, undefined, new Headers());
+    const create = vi.fn().mockImplementationOnce(async () => { controller.abort(); throw error; });
+    const client = { chat: { completions: { create } } } as unknown as Groq;
+    const handlers = createAgentHandlers({ config: () => ({ apiKey: key, model }), client: () => client });
+    const response = await handlers.POST(new Request(request(input()), { signal: controller.signal }));
+    expect(response.status).toBe(408);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(buying.createOperationalBuyingPlan).not.toHaveBeenCalled();
+  });
+  it("retry usa o mesmo signal e termina no prazo total original de 30 segundos", async () => {
+    vi.useFakeTimers();
+    try {
+      const error = new Groq.BadRequestError(400, { error: { code: "tool_use_failed" } }, undefined, new Headers());
+      const create = vi.fn()
+        .mockImplementationOnce(async () => { await new Promise((resolve) => setTimeout(resolve, 29000)); throw error; })
+        .mockImplementationOnce((_body: unknown, options: { signal: AbortSignal }) => new Promise((_, reject) => {
+          options.signal.addEventListener("abort", () => reject(new DOMException("private", "AbortError")), { once: true });
+        }));
+      const client = { chat: { completions: { create } } } as unknown as Groq;
+      const handlers = createAgentHandlers({ config: () => ({ apiKey: key, model }), client: () => client });
+      const result = handlers.POST(request(input()));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(create).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(29000);
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(create.mock.calls[1][1].signal).toBe(create.mock.calls[0][1].signal);
+      expect(create.mock.calls.map(([, options]) => options.maxRetries)).toEqual([0, 0]);
+      await vi.advanceTimersByTimeAsync(1000);
+      const response = await result;
+      expect(response.status).toBe(504); expect((await response.json()).action).toBeUndefined();
+      expect(create).toHaveBeenCalledTimes(2);
+      expect(buying.createOperationalBuyingPlan).not.toHaveBeenCalled();
+      expect(console.warn).toHaveBeenLastCalledWith('{"event":"agent_groq","reason":"provider_timeout"}');
+    } finally { vi.useRealTimers(); }
+  });
+});
 
 describe("isolamento serverless de comprovantes", () => {
   it("producao com WAF direto executa e revisa sem chamada ao Firewall SDK", async () => {

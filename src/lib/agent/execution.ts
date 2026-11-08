@@ -1,12 +1,34 @@
 import "server-only";
-import type Groq from "groq-sdk";
+import Groq from "groq-sdk";
+import type { ChatCompletionCreateParamsNonStreaming } from "groq-sdk/resources/chat/completions";
 import { createOperationalDemo } from "../operations/demo";
 import { createOperationalBuyingPlan } from "../smart-buying/index";
 import { formatMoney, formatNumber } from "../dashboard/format";
 import { AGENT_TOOL, AGENT_LIMITS, AgentError, parseToolArguments } from "./contracts";
 import type { AgentAction } from "./contracts";
 
+function isToolUseFailed(error: unknown): boolean {
+  if (!(error instanceof Groq.APIError) || error.status !== 400 || !error.error || typeof error.error !== "object") return false;
+  const body = error.error as Record<string, unknown>;
+  const detail = body.error && typeof body.error === "object" ? body.error as Record<string, unknown> : body;
+  return detail.code === "tool_use_failed";
+}
+
 export async function executeDemoAgent(prompt: string, client: Groq, model: string, signal: AbortSignal): Promise<Omit<AgentAction, "id" | "status" | "createdAt" | "expiresAt" | "reviewedAt">> {
+  let retryAvailable = true;
+  const complete = async (body: ChatCompletionCreateParamsNonStreaming): Promise<Groq.Chat.Completions.ChatCompletion> => {
+    signal.throwIfAborted();
+    try {
+      // Leave room for a colder retry; never enable the SDK's automatic retries.
+      return await client.chat.completions.create({ ...body, temperature: retryAvailable ? 0.2 : 0 }, { signal, maxRetries: 0 });
+    } catch (error) {
+      if (!retryAvailable || !isToolUseFailed(error)) throw error;
+      signal.throwIfAborted();
+      retryAvailable = false;
+      // Only ask for a fresh response. Never parse/replay failed_generation.
+      return await client.chat.completions.create({ ...body, temperature: 0 }, { signal, maxRetries: 0 });
+    }
+  };
   const { dataset, parameters } = createOperationalDemo();
   const tool: Groq.Chat.Completions.ChatCompletionTool = { type: "function", function: { name: AGENT_TOOL,
     description: "Calcula rascunhos de compras exclusivamente para a demonstração independente do go.flow. Não executa pedidos. Quantidades e custos são calculados pelo Smart Buying, nunca pelo modelo.",
@@ -19,8 +41,8 @@ export async function executeDemoAgent(prompt: string, client: Groq, model: stri
     { role: "user", content: prompt },
   ];
   const reasoning = model.startsWith("openai/gpt-oss-") ? { reasoning_effort: "low" as const } : {};
-  const first = await client.chat.completions.create({ model, messages, tools: [tool], tool_choice: { type: "function", function: { name: AGENT_TOOL } },
-    parallel_tool_calls: false, store: false, temperature: 0, max_completion_tokens: 2048, ...reasoning }, { signal });
+  const first = await complete({ model, messages, tools: [tool], tool_choice: { type: "function", function: { name: AGENT_TOOL } },
+    parallel_tool_calls: false, store: false, max_completion_tokens: 2048, ...reasoning });
   const choice = first?.choices?.[0], calls = choice?.message?.tool_calls;
   if (choice?.finish_reason !== "tool_calls" || !Array.isArray(calls) || calls.length !== 1 || calls[0]?.type !== "function" || calls[0]?.function?.name !== AGENT_TOOL || typeof calls[0].id !== "string" || !calls[0].id || calls[0].id.length > 200) throw new AgentError("INVALID_TOOL_CALL", "O modelo não devolveu uma única chamada operacional válida. Nenhuma ação foi criada.", 422);
   const call = calls[0], args = parseToolArguments(call.function.arguments, parameters.budgetCents, new Set(dataset.skus.map((s) => s.sku)));
@@ -33,11 +55,11 @@ export async function executeDemoAgent(prompt: string, client: Groq, model: stri
   const toolSummary = { source: "independent_synthetic", proposalCount: plan.proposals.length, budget: plan.budget,
     exampleProposals: plan.proposals.slice(0, 5).map((p) => ({ sku: p.sku, purchaseUnit: p.purchaseUnit, quantity: p.quantityPurchaseUnits, physicalUnits: p.physicalUnits, costCents: p.estimatedCostCents })),
     caveats: ["Rascunhos sujeitos a revisão humana", "Nenhum pedido enviado", "Projeções condicionais", "Pendências não creditadas", "Sem buffer calibrado ou campanhas inferidas"], };
-  const second = await client.chat.completions.create({ model, messages: [...messages,
+  const second = await complete({ model, messages: [...messages,
     { role: "assistant", content: null, tool_calls: [{ id: call.id, type: "function", function: { name: AGENT_TOOL, arguments: JSON.stringify(args) } }] },
     { role: "tool", tool_call_id: call.id, content: JSON.stringify(toolSummary) },
     { role: "system", content: "Confirme brevemente a conclusão da ferramenta, sem propor outras operações. A aplicação exibirá os números exclusivamente do resultado determinístico, não do seu texto." }],
-    tools: [tool], tool_choice: "none", parallel_tool_calls: false, store: false, temperature: 0, max_completion_tokens: 1024, ...reasoning }, { signal });
+    tools: [tool], tool_choice: "none", parallel_tool_calls: false, store: false, max_completion_tokens: 1024, ...reasoning });
   const confirmation = second?.choices?.[0];
   if (confirmation?.finish_reason !== "stop" || confirmation?.message?.tool_calls?.length || typeof confirmation?.message?.content !== "string" || !confirmation.message.content.trim()) throw new AgentError("INCOMPLETE_EXECUTION", "A confirmação da ferramenta não foi concluída. Nenhuma ação foi registrada.", 502);
   signal.throwIfAborted();
