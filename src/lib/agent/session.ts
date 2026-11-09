@@ -1,8 +1,18 @@
 import { AGENT_TOOL, AGENT_LIMITS, AgentError, parseAgentRequest, validReviewToken } from "./contracts";
-import type { AgentAction, AgentReceipt } from "./contracts";
+import type { AgentAction, AgentAnalysis, AgentReceipt } from "./contracts";
 import type { AgentTransport } from "./client";
 import type { ImportSession } from "../flow-import/session";
-export interface AgentSnapshot { draft: string; phase: "idle" | "running" | "reviewing" | "done" | "error"; receipts: AgentReceipt[]; error: string | null; notice: string | null }
+export interface AgentSnapshot { draft: string; phase: "idle" | "running" | "reviewing" | "done" | "error"; receipts: AgentReceipt[]; analysis: AgentAnalysis | null; error: string | null; notice: string | null }
+function validAnalysis(analysis: AgentAnalysis) {
+  const text = (value: unknown, maximum: number) => typeof value === "string" && value.length > 0 && value.length <= maximum;
+  return analysis?.kind === "analysis" && analysis.source === "demo" && text(analysis.model, 120) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(analysis.referenceDate) && Number.isFinite(Date.parse(analysis.executedAt)) &&
+    text(analysis.explanation, 2000) && Array.isArray(analysis.evidence) && analysis.evidence.length >= 1 && analysis.evidence.length <= 10 &&
+    new Set(analysis.evidence.map((fact) => fact.id)).size === analysis.evidence.length &&
+    analysis.evidence.every((fact) => fact && text(fact.id, 80) && text(fact.text, 2000)) &&
+    Array.isArray(analysis.limitations) && analysis.limitations.length <= 10 && analysis.limitations.every((item) => text(item, 1000)) &&
+    !["proposals", "tool", "reviewToken", "status"].some((key) => key in analysis);
+}
 function validAction(action: AgentAction) {
   if (!(action?.source === "demo" && typeof action.id === "string" && /^[a-f0-9-]{36}$/i.test(action.id) && typeof action.model === "string" && action.model.length > 0 && action.tool?.name === AGENT_TOOL && Array.isArray(action.proposals) &&
     ["pending_review", "approved", "rejected", "no_proposal"].includes(action.status) && Number.isSafeInteger(action.budget?.usedCents) && action.budget.usedCents >= 0 &&
@@ -18,7 +28,7 @@ function validAction(action: AgentAction) {
   return total === BigInt(action.budget.usedCents);
 }
 export function createAgentSession(source: ImportSession, transport: AgentTransport) {
-  let state: AgentSnapshot = { draft: "", phase: "idle", receipts: [], error: null, notice: null };
+  let state: AgentSnapshot = { draft: "", phase: "idle", receipts: [], analysis: null, error: null, notice: null };
   const listeners = new Set<() => void>();
   let controller: AbortController | null = null, unsubscribe: (() => void) | null = null;
   const update = (patch: Partial<AgentSnapshot>) => { state = { ...state, ...patch }; listeners.forEach((listener) => listener()); };
@@ -32,7 +42,7 @@ export function createAgentSession(source: ImportSession, transport: AgentTransp
     subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     start: () => {
       unsubscribe?.();
-      unsubscribe = source.subscribe(() => { cancel(); update({ draft: "", phase: "idle", error: null, notice: null }); });
+      unsubscribe = source.subscribe(() => { cancel(); update({ draft: "", phase: "idle", analysis: null, error: null, notice: null }); });
     },
     dispose: () => { cancel(); unsubscribe?.(); unsubscribe = null; },
     setDraft: (draft: string) => { if (allowed() && !busy()) update({ draft: draft.slice(0, AGENT_LIMITS.promptChars), error: null, notice: null }); },
@@ -43,10 +53,15 @@ export function createAgentSession(source: ImportSession, transport: AgentTransp
       try { request = parseAgentRequest({ source: "demo", requestId: crypto.randomUUID(), prompt: state.draft }); }
       catch (error) { fail(error); return false; }
       const revision = source.getSnapshot().revision, current = new AbortController(); controller = current;
-      update({ phase: "running", error: null, notice: null });
+      update({ phase: "running", analysis: null, error: null, notice: null });
       try {
         const receipt = await transport.execute(request, current.signal);
         if (!same(current, revision)) return false;
+        if (receipt && "analysis" in receipt) {
+          if (Object.keys(receipt).length !== 1 || !validAnalysis(receipt.analysis)) throw new AgentError("INVALID_RESULT", "Análise inválida; nenhuma proposta foi adicionada à sessão.");
+          update({ phase: "done", draft: "", analysis: receipt.analysis, notice: "Análise demonstrativa concluída, sem proposta de compra." });
+          return true;
+        }
         if (!validAction(receipt?.action) || !["pending_review", "no_proposal"].includes(receipt.action.status) || !validReviewToken(receipt.reviewToken)) throw new AgentError("INVALID_RESULT", "Resposta operacional inválida; nenhuma ação foi adicionada à sessão.");
         const receipts = [receipt, ...state.receipts.filter((r) => r.action.id !== receipt.action.id)].slice(0, AGENT_LIMITS.sessionRecords);
         update({ phase: "done", draft: "", receipts, notice: receipt.action.status === "no_proposal" ? "Ferramenta concluída sem proposta viável. A Central registra a análise, sem compra recomendada." : "Proposta calculada e registrada na Central de Ações, aguardando revisão humana." });

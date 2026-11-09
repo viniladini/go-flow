@@ -3,7 +3,7 @@ import { ESLint } from "eslint";
 import { createAgentSession } from "@/lib/agent/session";
 import { agentTransport } from "@/lib/agent/client";
 import { createImportSession } from "@/lib/flow-import/session";
-import { agentReceipt } from "../fixtures/agent";
+import { agentReceipt, agentAnalysis } from "../fixtures/agent";
 import { operationalFixture } from "../fixtures/operational";
 import type { AgentTransport } from "@/lib/agent/client";
 import type { AgentReceipt, AgentRequest } from "@/lib/agent/contracts";
@@ -16,6 +16,49 @@ function setup() {
   return { source, receipt, transport, agent };
 }
 describe("sessão do go.agent e barreira da fonte importada", () => {
+  it("análise aparece sem comprovante, proposta ou revisão e é limpa ao trocar fonte", async () => {
+    const { agent, source, transport } = setup();
+    vi.mocked(transport.execute).mockResolvedValueOnce(agentAnalysis());
+    agent.setDraft("Analisar risco de ruptura");
+    expect(await agent.execute()).toBe(true);
+    expect(agent.getSnapshot().analysis).toEqual(agentAnalysis().analysis);
+    expect(agent.getSnapshot().receipts).toEqual([]);
+    expect(await agent.review(crypto.randomUUID(), "approve")).toBe(false);
+    expect(transport.review).not.toHaveBeenCalled();
+    source.commit(operationalFixture(), 0);
+    expect(agent.getSnapshot().analysis).toBeNull();
+    agent.setDraft("Analisar risco de ruptura");
+    expect(await agent.execute()).toBe(false); expect(transport.execute).toHaveBeenCalledTimes(1);
+    agent.dispose();
+  });
+  it("análise não sobrescreve proposta anterior nem permite promover resposta mista", async () => {
+    const { agent, receipt, transport } = setup();
+    agent.setDraft("Planeje compras da demo."); await agent.execute();
+    vi.mocked(transport.execute).mockResolvedValueOnce(agentAnalysis());
+    agent.setDraft("Analisar risco de ruptura"); await agent.execute();
+    expect(agent.getSnapshot().receipts).toEqual([receipt]);
+    vi.mocked(transport.execute).mockResolvedValueOnce({ ...agentAnalysis(), ...receipt });
+    agent.setDraft("Analisar risco de ruptura");
+    expect(await agent.execute()).toBe(false);
+    expect(agent.getSnapshot().receipts).toEqual([receipt]);
+    expect(agent.getSnapshot().analysis).toBeNull(); agent.dispose();
+  });
+  it("ignora análise tardia depois da troca para dados importados", async () => {
+    const { agent, source, transport } = setup();
+    let finish!: (value: ReturnType<typeof agentAnalysis>) => void;
+    vi.mocked(transport.execute).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    agent.setDraft("Analisar risco de ruptura"); const running = agent.execute();
+    source.commit(operationalFixture(), 0); finish(agentAnalysis());
+    expect(await running).toBe(false); expect(agent.getSnapshot().analysis).toBeNull();
+    expect(agent.getSnapshot().receipts).toEqual([]); agent.dispose();
+  });
+  it("recusa conteúdo de proposta escondido numa resposta de análise", async () => {
+    const { agent, transport } = setup();
+    vi.mocked(transport.execute).mockResolvedValueOnce({ analysis: { ...agentAnalysis().analysis, proposals: [] } } as ReturnType<typeof agentAnalysis>);
+    agent.setDraft("Analisar risco de ruptura");
+    expect(await agent.execute()).toBe(false);
+    expect(agent.getSnapshot().analysis).toBeNull(); expect(agent.getSnapshot().receipts).toEqual([]); agent.dispose();
+  });
   it("registra somente resposta validada e preserva a proposta ao trocar de assinante/página", async () => {
     const { agent, transport } = setup(); const subscriber = vi.fn(), unsubscribe = agent.subscribe(subscriber);
     agent.setDraft("Planeje as compras da demonstração."); expect(await agent.execute()).toBe(true);

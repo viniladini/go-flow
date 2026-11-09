@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ImportSessionProvider, useAgentSession, useImportSession } from "@/components/import-session-provider";
 import { AgentWorkspace } from "@/components/agent-workspace";
 import { agentTransport } from "@/lib/agent/client";
-import { agentReceipt } from "../fixtures/agent";
+import { agentReceipt, agentAnalysis } from "../fixtures/agent";
 import { operationalFixture } from "../fixtures/operational";
 import type { AgentSession } from "@/lib/agent/session";
 import type { ImportSession } from "@/lib/flow-import/session";
@@ -31,6 +31,20 @@ beforeEach(async () => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe("go.agent e Central de Ações", () => {
+  it("sugestão de risco exibe análise verificada sem proposta ou controles de aprovação", async () => {
+    vi.mocked(agentTransport.execute).mockResolvedValueOnce(agentAnalysis());
+    await act(async () => container.querySelector<HTMLButtonElement>(".agent-suggestions button")!.click());
+    await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+    expect(vi.mocked(agentTransport.execute).mock.calls[0][0].prompt).toBe("analisar risco de ruptura");
+    const analysis = container.querySelector('[aria-label="Análise demonstrativa verificada"]');
+    expect(analysis?.textContent).toContain(agentAnalysis().analysis.evidence[0].text);
+    expect(container.querySelector("[data-action-id]")).toBeNull();
+    expect(container.querySelector(".agent-review")).toBeNull();
+    expect(current.agent.getSnapshot().receipts).toEqual([]);
+    expect(agentTransport.review).not.toHaveBeenCalled();
+    await act(async () => current.source.commit(operationalFixture(), 0));
+    expect(container.querySelector('[aria-label="Análise demonstrativa verificada"]')).toBeNull();
+  });
   it("mostra limites reais e agrupa 191 ressalvas mantendo o ultimo SKU acessivel", async () => {
     const receipt = agentReceipt();
     receipt.action.alertDetails = Array.from({ length: 191 }, (_, i) => ({ code: "pending_orders_uncertain", sku: `DEMO-ALERT-${i}`, message: "Pedidos pendentes não creditados." }));

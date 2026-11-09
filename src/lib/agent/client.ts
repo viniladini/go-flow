@@ -1,7 +1,7 @@
 import { AgentError, parseAgentRequest, parseReviewRequest } from "./contracts";
-import type { AgentAction, AgentReceipt, AgentRequest, ReviewRequest } from "./contracts";
+import type { AgentAction, AgentExecutionResponse, AgentRequest, ReviewRequest } from "./contracts";
 export interface AgentTransport {
-  execute(request: AgentRequest, signal: AbortSignal): Promise<AgentReceipt>;
+  execute(request: AgentRequest, signal: AbortSignal): Promise<AgentExecutionResponse>;
   review(request: ReviewRequest, signal: AbortSignal): Promise<AgentAction>;
 }
 async function json(request: object, method: "POST" | "PATCH", signal: AbortSignal) {

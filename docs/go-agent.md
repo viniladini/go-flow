@@ -14,6 +14,28 @@ somente por módulos com `import "server-only"`. Nunca use NEXT_PUBLIC para a ch
 
 ## Fluxo verificável
 
+O servidor separa intenções antes de oferecer ferramentas. Pedidos explícitos de
+planejamento de compras seguem o fluxo abaixo. Análises de estoque, ruptura,
+cobertura e capital parado usam apenas o motor analítico demonstrativo existente,
+sem chamar Smart Buying. A Groq recebe evidências sintéticas calculadas e seleciona
+IDs relevantes, sem ferramentas; a aplicação valida esses IDs e exibe somente o
+texto determinístico das evidências, nunca métricas ou texto livre inventados.
+Uma análise não emite comprovante, não entra na Central e não admite aprovação.
+
+Pedidos de execução, envio de pedidos, contato com fornecedores ou dispensa de
+aprovação são recusados antes da chamada à Groq. A autorização é uma regra
+conservadora da aplicação, não uma classificação livre do modelo. Solicitações
+ambíguas ou misturando análise e criação de propostas pedem esclarecimento. Frases
+negadas ou citando execução também podem exigir reformulação; não autorizam uma
+proposta silenciosamente. Pedidos que mencionam dados importados/privados são
+bloqueados; a barreira de fonte importada no cliente e servidor permanece ativa.
+
+O retry existente é compartilhado por execução: somente HTTP 400 com
+`tool_use_failed`, no máximo uma repetição, temperaturas 0,2 e 0 e o mesmo timeout
+total de trinta segundos. Isso também vale para a análise. Não há fallback para
+planejamento após análise inválida. O diagnóstico por tentativa inclui a fase
+`analysis`, além de `planning` e `confirmation`, sem registrar conteúdo do usuário.
+
 1. Na fonte demo, o usuário solicita um planejamento. Somente prompt, origem demo e
    UUID de execução são enviados ao endpoint de mesma origem `/api/agente`.
 2. O servidor oferece uma única ferramenta autorizada: `plan_demo_purchases`.

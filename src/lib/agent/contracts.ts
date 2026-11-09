@@ -16,6 +16,12 @@ export interface AgentAction {
   alertDetails?: BuyingResult["alerts"];
 }
 export interface AgentReceipt { action: AgentAction; reviewToken: string }
+export interface AgentAnalysis {
+  kind: "analysis"; source: "demo"; model: string; referenceDate: string; executedAt: string;
+  explanation: string; evidence: { id: string; text: string }[]; limitations: string[];
+}
+export interface AgentAnalysisResponse { analysis: AgentAnalysis }
+export type AgentExecutionResponse = AgentReceipt | AgentAnalysisResponse;
 export interface AgentRequest { source: "demo"; requestId: string; prompt: string }
 export interface ReviewRequest { source: "demo"; id: string; reviewToken: string; decision: "approve" | "reject" }
 export class AgentError extends Error {

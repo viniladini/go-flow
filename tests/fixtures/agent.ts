@@ -1,7 +1,11 @@
 import { createOperationalBuyingPlan } from "@/lib/smart-buying";
 import { operationalFixture } from "./operational";
 import { AGENT_TOOL } from "@/lib/agent/contracts";
-import type { AgentReceipt } from "@/lib/agent/contracts";
+import type { AgentReceipt, AgentAnalysisResponse } from "@/lib/agent/contracts";
+export function agentAnalysis(): AgentAnalysisResponse {
+  return { analysis: { kind: "analysis", source: "demo", model: "fixture-model", referenceDate: "2026-11-08", executedAt: "2026-11-08T15:00:00Z",
+    explanation: "Análise da demonstração sintética. Nenhuma proposta foi criada.", evidence: [{ id: "risk", text: "Risco crítico: 1 SKU na fixture sintética independente." }], limitations: ["Demonstração, sem pedidos ou propostas."] } };
+}
 export function agentReceipt(): AgentReceipt {
   const demo = operationalFixture("DEMO-AGENT-FIXTURE");
   const plan = createOperationalBuyingPlan({ dataset: demo.dataset, origin: "independent_synthetic", policy: demo.parameters });
