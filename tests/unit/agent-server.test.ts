@@ -57,9 +57,11 @@ describe("separação segura entre análise, planejamento e execução", () => {
     const response = await handlers.POST(request(input({ prompt })));
     expect(response.status).toBe(200);
     const body = await response.json();
-    const context = demoAnalysisContext(createOperationalDemo());
+    const context = demoAnalysisContext(createOperationalDemo(), prompt);
     expect(body.analysis).toMatchObject({ kind: "analysis", source: "demo", model: "openai/gpt-oss-120b", referenceDate: context.referenceDate, explanation: context.explanation });
-    expect(body.analysis.evidence).toEqual(["risk", "inventory", "methodology"].map((id) => context.facts.find((fact) => fact.id === id)));
+    expect(body.analysis.brief).toEqual(context.brief);
+    expect(body.analysis.evidence.every((fact: { id: string; text: string }) => context.facts.some((known) => known.id === fact.id && known.text === fact.text))).toBe(true);
+    for (const item of context.brief.items) expect(body.analysis.evidence.some((fact: { id: string }) => fact.id === item.sku)).toBe(true);
     expect(Object.keys(body)).toEqual(["analysis"]);
     expect(response.headers.get("set-cookie")).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -172,6 +174,35 @@ describe("separação segura entre análise, planejamento e execução", () => {
     }
     expect(fetchMock).toHaveBeenCalledTimes(2); expect(buying.createOperationalBuyingPlan).not.toHaveBeenCalled();
     expect(analysisEvents().every((entry) => entry.deploymentCommit === "a".repeat(40))).toBe(true);
+  });
+  it("acompanhamento recalcula a base atual sem reenviar métricas ou criar propostas", async () => {
+    const { handlers, fetchMock, bodies } = setup([analysisCompletion(), analysisCompletion()]);
+    const first = await (await handlers.POST(request(input({ prompt: "Analisar risco de ruptura" })))).json();
+    vi.setSystemTime(new Date("2026-11-09T15:00:00Z"));
+    const second = await handlers.POST(request(input({ prompt: "E a cobertura desses itens?", analysisContext: first.analysis.context })));
+    expect(second.status).toBe(200);
+    const body = await second.json();
+    expect(body.analysis.brief.topic).toBe("coverage"); expect(body.analysis.brief.refreshed).toBe(true);
+    expect(body.analysis.referenceDate).toBe("2026-11-09");
+    expect(body.analysis.context.snapshotId).not.toBe(first.analysis.context.snapshotId);
+    expect(body.analysis.brief.items.every((item: { sku: string }) => first.analysis.context.skuCodes.includes(item.sku))).toBe(true);
+    expect(body.action).toBeUndefined(); expect(body.reviewToken).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2); expect(buying.createOperationalBuyingPlan).not.toHaveBeenCalled();
+    expect(bodies.every((item) => !item.tools && item.tool_choice === "none")).toBe(true);
+  }, 15000);
+  it("metadados de acompanhamento não autorizam planejamento ou campos privados", async () => {
+    const { handlers, fetchMock } = setup();
+    const context = { topic: "risk", skuCodes: ["DEMO-FLOW-0011"], referenceDate: "2026-11-08", snapshotId: "a".repeat(64) };
+    for (const changes of [
+      { prompt: "Planeje compras da demonstração", analysisContext: context },
+      { prompt: "E esses itens?", analysisContext: { ...context, metrics: { private: 123 } } },
+      { prompt: "Execute as compras desses itens", analysisContext: context },
+      { prompt: "E esses itens?", source: "imported_local", analysisContext: context },
+    ]) {
+      const response = await handlers.POST(request(input(changes)));
+      expect(response.status).toBeGreaterThanOrEqual(400); expect((await response.json()).action).toBeUndefined();
+    }
+    expect(fetchMock).not.toHaveBeenCalled(); expect(buying.createOperationalBuyingPlan).not.toHaveBeenCalled();
   });
 });
 describe("orquestração real via SDK oficial com API mockada", () => {

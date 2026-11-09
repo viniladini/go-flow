@@ -1,7 +1,8 @@
 import { AgentError } from "./contracts";
+import { isAnalysisFollowUp } from "./analysis-topics";
 
 /** Conservative application permission gate, not an LLM authorization decision. */
-export function resolveAgentIntent(prompt: string): "analysis" | "planning" {
+export function resolveAgentIntent(prompt: string, hasAnalysisContext = false): "analysis" | "planning" {
   const text = prompt.normalize("NFKD").replace(/\p{M}|\p{Cf}/gu, "").toLowerCase().replace(/\s+/g, " ");
   // Mixed requests are rejected as a whole. Negated/quoted execution requests may
   // require rephrasing; they never silently authorize the creation of drafts.
@@ -20,7 +21,7 @@ export function resolveAgentIntent(prompt: string): "analysis" | "planning" {
   const planning = (/^(?:(?:quero|preciso|gostaria de|voce pode|pode|poderia)\s+)?(planeje|planejar|elabore|elaborar|prepare|preparar|gere|gerar|crie|criar|monte|montar|faca|fazer|proponha|simule|simular)\b.{0,70}\b(compras?|reposicao)\b/.test(request) ||
     /^(quero|preciso|solicito)\s+(?:de\s+)?(?:um[ao]?\s+)?(propostas?|planos?|planejamento|rascunhos?)\s+de\s+compras?\b/.test(request)) &&
     /\b(planeje|planejar|planejamento|planos?|propostas?|proponha|rascunhos?|simulacao|simule|simular)\b/.test(text);
-  const analysis = /\b(analis\w*|diagnostic\w*|expli\w*|risco|ruptura|cobertura|estoque|capital parado|entend\w*)\b/.test(text);
+  const analysis = /\b(analis\w*|diagnostic\w*|expli\w*|risco|ruptura|cobertura|estoque|capital|entend\w*|prior\w*|critic\w*|causas?|motivos?|por que|lead\s*time|prazos?|oportunidades?|excesso|giro)\b/.test(text) || hasAnalysisContext && isAnalysisFollowUp(prompt);
   if (planning && !/\b(analis\w*|diagnostic\w*|expli\w*)\b/.test(text) && !/\b(nao|somente|apenas)\b.{0,30}\b(planej\w*|cri\w*|ger\w*|proposta|rascunho)\b/.test(text)) return "planning";
   // A terminal, explicitly negative constraint is compatible with read-only
   // analysis. It never changes the planning permission decision above.

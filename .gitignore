@@ -32,6 +32,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# Local repair scripts, build diagnostics and editor backups (never publish)
+/build-error.txt
+/corrigir-cores-apresentacao.ps1
+*.backup-*
 
 # vercel
 .vercel

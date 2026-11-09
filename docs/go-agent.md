@@ -14,6 +14,31 @@ somente por módulos com `import "server-only"`. Nunca use NEXT_PUBLIC para a ch
 
 ## Fluxo verificável
 
+### Resposta analítica orientada à decisão
+
+As análises diferenciam risco, prioridades, causas, cobertura, lead time e
+oportunidades. O backend compõe resumo executivo, indicadores do escopo, até cinco
+materiais e próximos passos qualitativos vinculados às evidências. A Groq continua
+selecionando IDs verificados; não escreve números nem recomenda quantidades.
+Prioridades obrigatórias não podem ser removidas pela seleção do modelo.
+
+A ordenação é explícita: risco e déficit válido dentro da classe; cobertura por
+maior déficit e menor cobertura; prazo por maior média com amostra suficiente;
+oportunidades por maior capital elegível ao custo, sem somar categorias sobrepostas.
+Empates usam SKU. O déficit é `max(0, lead time médio - cobertura)` em dias, somente
+com evidências válidas e atuais. Não altera classificação de risco, buffer,
+demanda ou planejamento, nem comprova ruptura física. Dados desconhecidos continuam
+indisponíveis. Os agregados do escopo reutilizam o motor analítico existente.
+
+O acompanhamento fica na memória da aba: somente tema, IDs demonstrativos,
+data-base e fingerprint da análise podem voltar ao endpoint. Não são enviados
+resultados anteriores, histórico livre ou parâmetros operacionais. Esses metadados
+não autorizam ferramentas ou propostas e são validados antes do processamento.
+Toda pergunta recalcula a base sintética atual; mudanças de fingerprint/data geram
+aviso explícito. Trocar fonte apaga o contexto e cancela requisições pendentes.
+Não há memória analítica global entre visitantes. O contexto é seleção de dados
+públicos da demo, não credencial de autorização. Refresh pode apagá-lo.
+
 O servidor separa intenções antes de oferecer ferramentas. Pedidos explícitos de
 planejamento de compras seguem o fluxo abaixo. Análises de estoque, ruptura,
 cobertura e capital parado usam apenas o motor analítico demonstrativo existente,

@@ -205,13 +205,17 @@ describe("experiência de apresentação", () => {
     expect(dialog().getAttribute("data-palette")).toBe("lime");
     const start = [...dialog().querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Começar")!;
     await act(async () => start.click());
-    expect(dialog().getAttribute("data-palette")).toBe("deep");
+    // Global chrome follows the outgoing scene until its mask completes.
+    expect(dialog().getAttribute("data-palette")).toBe("lime");
+    expect(dialog().querySelector('.presentation-scene[data-scene="1"]')?.getAttribute("data-palette")).toBe("deep");
     const forward = dialog().querySelector<HTMLButtonElement>('[aria-label="Avançar"]')!;
     expect(forward.disabled).toBe(false);
     await act(async () => forward.click());
-    expect(dialog().getAttribute("data-palette")).toBe("blue");
+    expect(dialog().getAttribute("data-palette")).toBe("deep");
+    expect(dialog().querySelector('.presentation-scene[data-scene="2"]')?.getAttribute("data-palette")).toBe("blue");
     expect(dialog().querySelectorAll(".outgoing")).toHaveLength(1);
     await tick(SCENE_TRANSITION_MS);
+    expect(dialog().getAttribute("data-palette")).toBe("blue");
     await click("Avançar"); expect(dialog().getAttribute("data-palette")).toBe("paper");
     await click("Avançar"); expect(dialog().getAttribute("data-palette")).toBe("deep");
   });
@@ -313,7 +317,8 @@ describe("experiência de apresentação", () => {
     await act(async () => dialog().querySelector<HTMLButtonElement>(".presentation-next")!.click());
     await tick(IRIS_EXPANSION_MS);
     for (const [index, palette] of PRESENTATION_PALETTE.entries()) {
-      expect(dialog().dataset.palette).toBe(palette);
+      expect(dialog().querySelector(`.presentation-scene[data-scene="${index}"]`)?.getAttribute("data-palette")).toBe(palette);
+      expect(dialog().dataset.palette).toBe(PRESENTATION_PALETTE[Math.max(0, index - 1)]);
       await tick(600_000);
       expect(dialog().dataset.scene).toBe(String(index));
       expect(dialog().dataset.palette).toBe(palette);

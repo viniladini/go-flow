@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ImportSessionProvider, useAgentSession, useImportSession } from "@/components/import-session-provider";
 import { AgentWorkspace } from "@/components/agent-workspace";
 import { agentTransport } from "@/lib/agent/client";
-import { agentReceipt, agentAnalysis } from "../fixtures/agent";
+import { agentReceipt, agentAnalysis, agentBriefAnalysis } from "../fixtures/agent";
 import { operationalFixture } from "../fixtures/operational";
 import type { AgentSession } from "@/lib/agent/session";
 import type { ImportSession } from "@/lib/flow-import/session";
@@ -31,6 +31,20 @@ beforeEach(async () => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe("go.agent e Central de Ações", () => {
+  it("hierarquiza resumo, indicadores, itens e próximos passos sem repetir o relatório técnico", async () => {
+    const response = agentBriefAnalysis(); response.analysis.brief!.refreshed = true;
+    vi.mocked(agentTransport.execute).mockResolvedValueOnce(response);
+    await act(async () => { current.agent.setDraft("Analisar risco de ruptura"); await current.agent.execute(); });
+    const panel = container.querySelector('[aria-label="Análise demonstrativa verificada"]')!;
+    expect(panel.querySelector("h2")?.textContent).toBe(response.analysis.brief!.title);
+    expect(panel.querySelector(".agent-explanation")?.textContent).toBe(response.analysis.brief!.summary);
+    expect(panel.querySelector('[aria-label="Indicadores da análise"]')?.textContent).toContain("Risco crítico no escopo");
+    expect(panel.querySelector("ol")?.textContent).toContain("DEMO-FLOW-0011");
+    expect(panel.querySelector("ul")?.textContent).toContain("Confirme a situação dos pedidos pendentes");
+    expect(panel.querySelector("details")?.hasAttribute("open")).toBe(false);
+    expect(panel.textContent).toContain("Recalculei"); expect(panel.textContent).not.toContain("Análise em Indisponível");
+    expect(container.querySelector(".agent-review")).toBeNull();
+  });
   it("sugestão de risco exibe análise verificada sem proposta ou controles de aprovação", async () => {
     vi.mocked(agentTransport.execute).mockResolvedValueOnce(agentAnalysis());
     await act(async () => container.querySelector<HTMLButtonElement>(".agent-suggestions button")!.click());

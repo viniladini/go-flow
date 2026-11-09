@@ -8,3 +8,8 @@ references-private/
 .next/
 coverage/
 *.pem
+
+# Local repair scripts, build diagnostics and editor backups
+build-error.txt
+corrigir-cores-apresentacao.ps1
+*.backup-*

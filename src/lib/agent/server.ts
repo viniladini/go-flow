@@ -119,7 +119,7 @@ export function createAgentHandlers(dependencies: Dependencies = {}) {
         controller.signal.throwIfAborted();
         executingGroq = true;
         const client = dependencies.client ? dependencies.client(config) : new Groq({ apiKey: config.apiKey, baseURL: "https://api.groq.com", maxRetries: 0, timeout: 15000, logLevel: "off" });
-        const result = await executeDemoAgent(input.prompt, client, config.model, controller.signal);
+        const result = await executeDemoAgent(input.prompt, client, config.model, controller.signal, input.analysisContext);
         controller.signal.throwIfAborted();
         executingGroq = false;
         if ("kind" in result) return response({ analysis: result });

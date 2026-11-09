@@ -3,7 +3,7 @@ import { ESLint } from "eslint";
 import { createAgentSession } from "@/lib/agent/session";
 import { agentTransport } from "@/lib/agent/client";
 import { createImportSession } from "@/lib/flow-import/session";
-import { agentReceipt, agentAnalysis } from "../fixtures/agent";
+import { agentReceipt, agentAnalysis, agentBriefAnalysis } from "../fixtures/agent";
 import { operationalFixture } from "../fixtures/operational";
 import type { AgentTransport } from "@/lib/agent/client";
 import type { AgentReceipt, AgentRequest } from "@/lib/agent/contracts";
@@ -16,6 +16,37 @@ function setup() {
   return { source, receipt, transport, agent };
 }
 describe("sessão do go.agent e barreira da fonte importada", () => {
+  it("acompanhamento transmite somente IDs demo e não empresta contexto a outra sessão ou ao planejamento", async () => {
+    const { agent, transport } = setup();
+    vi.mocked(transport.execute).mockResolvedValue(agentBriefAnalysis());
+    agent.setDraft("Analisar risco de ruptura"); expect(await agent.execute()).toBe(true);
+    agent.setDraft("E a cobertura desses itens?"); expect(await agent.execute()).toBe(true);
+    const body = vi.mocked(transport.execute).mock.calls[1][0];
+    expect(body.analysisContext).toEqual(agentBriefAnalysis().analysis.context);
+    expect(Object.keys(body.analysisContext!).sort()).toEqual(["referenceDate", "skuCodes", "snapshotId", "topic"]);
+    const second = setup(); second.agent.setDraft("E esses itens?"); await second.agent.execute();
+    expect(vi.mocked(second.transport.execute).mock.calls[0][0]).not.toHaveProperty("analysisContext");
+    vi.mocked(transport.execute).mockResolvedValueOnce(agentReceipt());
+    agent.setDraft("Planeje compras da demo."); expect(await agent.execute()).toBe(true);
+    expect(vi.mocked(transport.execute).mock.calls[2][0]).not.toHaveProperty("analysisContext");
+    agent.dispose(); second.agent.dispose();
+  });
+  it("trocar fonte apaga contexto de acompanhamento e nunca transmite dados importados", async () => {
+    const { agent, source, transport } = setup();
+    vi.mocked(transport.execute).mockResolvedValue(agentBriefAnalysis());
+    agent.setDraft("Analisar risco de ruptura"); await agent.execute();
+    source.commit(operationalFixture(), 0); agent.setDraft("E esses itens?");
+    expect(await agent.execute()).toBe(false); expect(transport.execute).toHaveBeenCalledTimes(1);
+    source.clear(); agent.setDraft("E esses itens?"); await agent.execute();
+    expect(vi.mocked(transport.execute).mock.calls[1][0]).not.toHaveProperty("analysisContext"); agent.dispose();
+  });
+  it("recusa recomendações sem rastreabilidade em uma resposta estruturada", async () => {
+    const { agent, transport } = setup();
+    const response = agentBriefAnalysis(); response.analysis.brief!.recommendations[0].evidenceIds = ["invented"];
+    vi.mocked(transport.execute).mockResolvedValue(response); agent.setDraft("Analisar risco de ruptura");
+    expect(await agent.execute()).toBe(false); expect(agent.getSnapshot().analysis).toBeNull();
+    expect(agent.getSnapshot().receipts).toEqual([]); agent.dispose();
+  });
   it("análise aparece sem comprovante, proposta ou revisão e é limpa ao trocar fonte", async () => {
     const { agent, source, transport } = setup();
     vi.mocked(transport.execute).mockResolvedValueOnce(agentAnalysis());

@@ -1,10 +1,11 @@
 import "server-only";
 import { analyzeOperationalDataset, operationalAnalyticsConfig } from "../analytics";
 import { createDashboardModel } from "../dashboard/presentation";
-import { formatDate } from "../dashboard/format";
+import { formatDate, formatDays } from "../dashboard/format";
 import { AgentError } from "./contracts";
-import type { AgentAnalysis } from "./contracts";
+import type { AgentAnalysis, AnalysisFollowUpContext } from "./contracts";
 import type { createOperationalDemo } from "../operations/demo";
+import { buildAnalysisBrief } from "./analysis-brief";
 
 export type AnalysisInvalidReason = "invalid_json" | "invalid_evidence_selection" | "response_shape_invalid" |
   "unexpected_finish_reason" | "unexpected_tool_calls" | "content_missing" | "content_too_large";
@@ -13,8 +14,9 @@ export class AnalysisValidationError extends AgentError {
 }
 
 /** Read-only: reuse analytics without invoking Smart Buying or creating drafts. */
-export function demoAnalysisContext({ dataset, parameters }: ReturnType<typeof createOperationalDemo>) {
+export function demoAnalysisContext({ dataset, parameters }: ReturnType<typeof createOperationalDemo>, prompt = "Analisar risco de ruptura", previous?: AnalysisFollowUpContext) {
   const analytics = analyzeOperationalDataset(dataset, operationalAnalyticsConfig(parameters.referenceDate, parameters.demandWindowDays));
+  const { brief, context } = buildAnalysisBrief(dataset, analytics, prompt, previous);
   const model = createDashboardModel(dataset, analytics, {
     kind: "independent_synthetic", id: "goflow-demo-v1", label: "Demonstração sintética", description: "Dados fictícios independentes.",
   });
@@ -22,13 +24,14 @@ export function demoAnalysisContext({ dataset, parameters }: ReturnType<typeof c
     { id: "risk", text: "Classificação de risco por SKU: " + model.risks.map((risk) => `${risk.label}: ${risk.displayCount}`).join("; ") + "." },
     ...model.kpis.map((metric) => ({ id: metric.id === "risk" ? "risk_detail" : metric.id, text: `${metric.label}: ${metric.value}. ${metric.context}. ${metric.detail}.` })),
     ...model.stockKpis.filter((metric) => metric.id !== "inventory").map((metric) => ({ id: metric.id, text: `${metric.label}: ${metric.value}. ${metric.context}. ${metric.detail}.` })),
-    ...model.priorities.slice(0, 8).map((row) => ({ id: row.sku, text: `${row.sku}: ${row.riskLabel}. ${row.riskReason} Estoque: ${row.balance}; cobertura: ${row.coverage}; lead time: ${row.leadTime}. ${row.coverageDetail}. ${row.leadTimeDetail}.` })),
+    ...brief.indicators.map((metric) => ({ id: `brief_${metric.id}`, text: `${metric.label}: ${metric.value}. ${metric.detail}` })),
+    ...brief.items.map((row) => ({ id: row.sku, text: `${row.sku} · ${row.name}: ${row.riskLabel}. ${row.reason} Cobertura: ${formatDays(row.coverageDays)}; lead time médio: ${formatDays(row.leadTimeDays)}; déficit estimado de cobertura: ${formatDays(row.coverageDeficitDays)}.` })),
     { id: "methodology", text: "Cobertura usa vendas observadas, não demanda garantida. O risco compara cobertura e lead time observado com buffer de variabilidade. Dados insuficientes e anomalias não comprovam ruptura. Pedidos pendentes não são estoque recebido; projeções não garantem serviço." },
   ];
   return {
     referenceDate: parameters.referenceDate,
-    explanation: `Análise da demonstração sintética · data-base ${formatDate(parameters.referenceDate)} · vendas observadas em janela de ${parameters.demandWindowDays} dias. Não é previsão real. Nenhuma proposta foi criada e nenhuma compra foi executada.`,
-    facts,
+    explanation: `Referência ${formatDate(parameters.referenceDate)} · vendas observadas em janela de ${parameters.demandWindowDays} dias.`,
+    facts, brief, context,
   };
 }
 
@@ -42,7 +45,10 @@ export function verifiedAnalysis(context: ReturnType<typeof demoAnalysisContext>
     throw new AnalysisValidationError("invalid_evidence_selection", "A análise não retornou evidências verificáveis. Nenhuma proposta foi criada.");
   }
   // The model only selects evidence IDs. Never display its free text or numbers.
+  const required = [...context.brief.indicators.map((metric) => `brief_${metric.id}`), ...context.brief.items.map((row) => row.sku)];
+  const relevant = new Set([...required, "methodology", ...(context.context.topic === "opportunities" ? ["inventory", "excess"] : ["risk", "risk_detail", "coverage", "anomaly"])]);
   return { kind: "analysis", source: "demo", model, referenceDate: context.referenceDate, executedAt: new Date().toISOString(), explanation: context.explanation,
-    evidence: [...new Set(["risk", ...ids, "methodology"])].map((id) => known.get(id)!),
-    limitations: ["Dados exclusivamente demonstrativos e sintéticos.", "Diagnóstico exploratório do motor analítico existente; não representa ordem ou proposta de compra."] };
+    evidence: [...new Set([...required, ...ids.filter((id) => relevant.has(id))])].slice(0, 10).map((id) => known.get(id)!),
+    brief: context.brief, context: context.context,
+    limitations: ["Demonstração sintética. Estimativas condicionais, sem comprovação de ruptura real. Nenhuma proposta, compra ou contato com fornecedor foi executado."] };
 }

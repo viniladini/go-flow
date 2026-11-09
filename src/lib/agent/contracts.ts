@@ -16,13 +16,23 @@ export interface AgentAction {
   alertDetails?: BuyingResult["alerts"];
 }
 export interface AgentReceipt { action: AgentAction; reviewToken: string }
+export const ANALYSIS_TOPICS = ["risk", "priorities", "causes", "coverage", "lead_time", "opportunities"] as const;
+export type AnalysisTopic = typeof ANALYSIS_TOPICS[number];
+export interface AnalysisFollowUpContext { topic: AnalysisTopic; skuCodes: string[]; referenceDate: string; snapshotId: string }
+export interface AnalysisBrief {
+  topic: AnalysisTopic; title: string; summary: string; criteria: string; refreshed: boolean;
+  indicators: { id: string; label: string; value: string; detail: string }[];
+  items: { sku: string; name: string; risk: string; riskLabel: string; reason: string; coverageDays: number | null; leadTimeDays: number | null; coverageDeficitDays: number | null }[];
+  recommendations: { id: string; text: string; skuCodes: string[]; evidenceIds: string[] }[];
+}
 export interface AgentAnalysis {
   kind: "analysis"; source: "demo"; model: string; referenceDate: string; executedAt: string;
   explanation: string; evidence: { id: string; text: string }[]; limitations: string[];
+  brief?: AnalysisBrief; context?: AnalysisFollowUpContext;
 }
 export interface AgentAnalysisResponse { analysis: AgentAnalysis }
 export type AgentExecutionResponse = AgentReceipt | AgentAnalysisResponse;
-export interface AgentRequest { source: "demo"; requestId: string; prompt: string }
+export interface AgentRequest { source: "demo"; requestId: string; prompt: string; analysisContext?: AnalysisFollowUpContext }
 export interface ReviewRequest { source: "demo"; id: string; reviewToken: string; decision: "approve" | "reject" }
 export class AgentError extends Error {
   constructor(public code: string, message: string, public status = 400) { super(message); this.name = "AgentError"; }
@@ -37,9 +47,21 @@ function keys(value: Record<string, unknown>, expected: string[]) {
   if (value.source !== "demo") throw new AgentError("DEMO_ONLY", "IA externa disponível exclusivamente na fonte demonstrativa.", 403);
 }
 export function parseAgentRequest(value: unknown): AgentRequest {
-  const v = object(value); keys(v, ["source", "requestId", "prompt"]);
+  const v = object(value); keys(v, ["source", "requestId", "prompt", ...("analysisContext" in v ? ["analysisContext"] : [])]);
   if (typeof v.requestId !== "string" || !uuid.test(v.requestId) || typeof v.prompt !== "string" || v.prompt.trim().length < 6 || v.prompt.length > AGENT_LIMITS.promptChars) throw new AgentError("INVALID_INPUT", "Informe uma solicitação entre 6 e 1.000 caracteres.");
-  return { source: "demo", requestId: v.requestId, prompt: v.prompt.trim() };
+  return { source: "demo", requestId: v.requestId, prompt: v.prompt.trim(), ...("analysisContext" in v ? { analysisContext: parseAnalysisContext(v.analysisContext) } : {}) };
+}
+export function parseAnalysisContext(value: unknown): AnalysisFollowUpContext {
+  const context = object(value);
+  const expected = ["topic", "skuCodes", "referenceDate", "snapshotId"];
+  if (Object.keys(context).length !== expected.length || expected.some((key) => !(key in context)) ||
+    !ANALYSIS_TOPICS.includes(context.topic as AnalysisTopic) || typeof context.referenceDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(context.referenceDate) ||
+    !Number.isFinite(Date.parse(context.referenceDate)) || new Date(context.referenceDate).toISOString().slice(0, 10) !== context.referenceDate ||
+    typeof context.snapshotId !== "string" || !/^[a-f0-9]{64}$/.test(context.snapshotId) || !Array.isArray(context.skuCodes) || context.skuCodes.length > 5 ||
+    new Set(context.skuCodes).size !== context.skuCodes.length || context.skuCodes.some((sku) => typeof sku !== "string" || !/^DEMO-FLOW-\d{4}$/.test(sku))) {
+    throw new AgentError("INVALID_INPUT", "Contexto analítico inválido. Faça uma nova pergunta sobre a demonstração.", 422);
+  }
+  return { topic: context.topic as AnalysisTopic, skuCodes: [...context.skuCodes] as string[], referenceDate: context.referenceDate, snapshotId: context.snapshotId };
 }
 export function parseReviewRequest(value: unknown): ReviewRequest {
   const v = object(value); keys(v, ["source", "id", "reviewToken", "decision"]);
