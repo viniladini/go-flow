@@ -13,7 +13,7 @@ interface Dependencies { config?: () => Config; client?: (config: Config) => Gro
 type GroqFailure = "api_key_missing" | "model_config_invalid" | "authentication_or_permission" |
   "model_or_parameters_incompatible" | "model_or_resource_not_found" | "provider_rate_limit" |
   "provider_timeout" | "provider_unavailable" | "provider_connection_error" | "execution_cancelled" |
-  "tool_call_invalid" | "tool_arguments_invalid" | "tool_confirmation_invalid" | "execution_unknown";
+  "tool_call_invalid" | "tool_arguments_invalid" | "tool_confirmation_invalid" | "analysis_invalid" | "execution_unknown";
 function logGroqFailure(reason: GroqFailure, upstreamStatus?: number, providerError?: ProviderErrorFields) {
   // eslint-disable-next-line no-console -- Fixed diagnostic categories/status only; no provider/request payloads.
   console.warn(JSON.stringify({ event: "agent_groq", reason, ...(upstreamStatus === undefined ? {} : { upstreamStatus }), ...(providerError ? { providerError } : {}) }));
@@ -24,9 +24,11 @@ function diagnoseGroqExecution(error: unknown, timedOut: boolean) {
   const status = typeof e?.status === "number" && Number.isInteger(e.status) && e.status >= 400 && e.status <= 599 ? e.status : undefined;
   if (timedOut || error instanceof Groq.APIConnectionTimeoutError || e?.name === "APIConnectionTimeoutError" || e?.name === "TimeoutError") reason = "provider_timeout";
   else if (error instanceof AgentError) {
+    if (["EXECUTION_NOT_AUTHORIZED", "INTENT_AMBIGUOUS", "DEMO_ONLY"].includes(error.code)) return;
     if (error.code === "INVALID_TOOL_CALL") reason = "tool_call_invalid";
     else if (error.code === "INVALID_TOOL") reason = "tool_arguments_invalid";
     else if (error.code === "INCOMPLETE_EXECUTION") reason = "tool_confirmation_invalid";
+    else if (error.code === "INVALID_ANALYSIS") reason = "analysis_invalid";
   } else if (status === 401 || status === 403) reason = "authentication_or_permission";
   else if (status === 400 || status === 422) reason = "model_or_parameters_incompatible";
   else if (status === 404) reason = "model_or_resource_not_found";
@@ -120,6 +122,7 @@ export function createAgentHandlers(dependencies: Dependencies = {}) {
         const result = await executeDemoAgent(input.prompt, client, config.model, controller.signal);
         controller.signal.throwIfAborted();
         executingGroq = false;
+        if ("kind" in result) return response({ analysis: result });
         const timestamp = now(), id = randomUUID();
         const action: AgentAction = { ...result, id, createdAt: new Date(timestamp).toISOString(), expiresAt: new Date(timestamp + AGENT_LIMITS.ttlMs).toISOString(),
           status: result.proposals.length ? "pending_review" : "no_proposal", reviewedAt: null };
