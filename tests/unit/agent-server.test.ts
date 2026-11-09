@@ -33,7 +33,12 @@ const input = (changes: Record<string, unknown> = {}) => ({ source: "demo", requ
 function request(body: unknown, method = "POST", origin = "http://localhost:3000", cookie = "goflow-demo-session=" + "a".repeat(64)) {
   return new Request("http://localhost:3000/api/agente", { method, headers: { origin, cookie, "content-type": "application/json" }, body: JSON.stringify(body) });
 }
-beforeEach(() => { vi.setSystemTime(new Date("2026-11-08T15:00:00Z")); vi.spyOn(console, "warn").mockImplementation(() => {}); });
+beforeEach(() => {
+  vi.setSystemTime(new Date("2026-11-08T15:00:00Z"));
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+  vi.spyOn(console, "info").mockImplementation(() => {});
+});
+const attempts = () => vi.mocked(console.info).mock.calls.map(([entry]) => JSON.parse(String(entry)));
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 describe("orquestração real via SDK oficial com API mockada", () => {
   it("preserva todas as ressalvas do catalogo sem cortar em vinte e mantem revisao assinada", async () => {
@@ -48,13 +53,13 @@ describe("orquestração real via SDK oficial com API mockada", () => {
     const review = await handlers.PATCH(request({ source: "demo", id: receipt.action.id, reviewToken: receipt.reviewToken, decision: "approve" }, "PATCH"));
     expect(review.status).toBe(200);
   }, 15000);
-  it("payload serializado do GPT-OSS 20B preserva tool calling sem modos incompativeis", async () => {
-    const { handlers, bodies, fetchMock } = setup(undefined, "openai/gpt-oss-20b");
+  it.each(["openai/gpt-oss-20b", "openai/gpt-oss-120b"])("payload serializado de %s preserva tool calling sem modos incompativeis", async (configuredModel) => {
+    const { handlers, bodies, fetchMock } = setup(undefined, configuredModel);
     const result = await handlers.POST(request(input()));
     expect(result.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     for (const body of bodies) {
-      expect(body).toMatchObject({ model: "openai/gpt-oss-20b", parallel_tool_calls: false, reasoning_effort: "low", store: false });
+      expect(body).toMatchObject({ model: configuredModel, parallel_tool_calls: false, reasoning_effort: "low", store: false });
       expect(body).not.toHaveProperty("reasoning_format");
       expect(body).not.toHaveProperty("response_format");
       expect(body).not.toHaveProperty("disable_tool_validation");
@@ -67,6 +72,17 @@ describe("orquestração real via SDK oficial com API mockada", () => {
     }
     expect(bodies[0].tool_choice).toEqual({ type: "function", function: { name: AGENT_TOOL } });
     expect(bodies[1].tool_choice).toBe("none");
+    expect((bodies[1].messages as unknown[]).slice(2, 4)).toEqual([
+      { role: "assistant", content: null, tool_calls: [{ id: "call_fixture", type: "function", function: { name: AGENT_TOOL, arguments: JSON.stringify(args) } }] },
+      { role: "tool", tool_call_id: "call_fixture", content: expect.any(String) },
+    ]);
+    expect(attempts().map(({ phase, attempt, call, outcome, model, temperature, toolChoice }) => ({ phase, attempt, call, outcome, model, temperature, toolChoice }))).toEqual([
+      { phase: "planning", attempt: 1, call: 1, outcome: "started", model: configuredModel, temperature: 0.2, toolChoice: AGENT_TOOL },
+      { phase: "planning", attempt: 1, call: 1, outcome: "response_received", model: configuredModel, temperature: 0.2, toolChoice: AGENT_TOOL },
+      { phase: "confirmation", attempt: 1, call: 2, outcome: "started", model: configuredModel, temperature: 0.2, toolChoice: "none" },
+      { phase: "confirmation", attempt: 1, call: 2, outcome: "response_received", model: configuredModel, temperature: 0.2, toolChoice: "none" },
+    ]);
+    expect(new Set(attempts().map((entry) => entry.executionId)).size).toBe(1);
     const receipt = await result.json() as AgentReceipt;
     expect(receipt.action.tool.name).toBe(AGENT_TOOL);
     expect((await handlers.PATCH(request({ source: "demo", id: receipt.action.id, reviewToken: receipt.reviewToken, decision: "approve" }, "PATCH"))).status).toBe(200);
@@ -165,7 +181,7 @@ describe("barreiras de privacidade e erros do servidor", () => {
     const responseBody = await result.json();
     expect(responseBody.action).toBeUndefined(); expect(responseBody.reviewToken).toBeUndefined();
     expect(console.warn).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ event: "agent_groq", reason: "model_or_parameters_incompatible", upstreamStatus: 400, providerError }));
-    const emitted = JSON.stringify(vi.mocked(console.warn).mock.calls) + JSON.stringify(responseBody);
+    const emitted = JSON.stringify(vi.mocked(console.warn).mock.calls) + JSON.stringify(vi.mocked(console.info).mock.calls) + JSON.stringify(responseBody);
     expect(emitted).not.toContain("fixture-private"); expect(emitted).not.toContain(key);
     expect(emitted).not.toContain("failed_generation");
   });
@@ -184,8 +200,8 @@ describe("barreiras de privacidade e erros do servidor", () => {
     const body = await result.json();
     expect(body.action).toBeUndefined(); expect(body.reviewToken).toBeUndefined();
     expect(console.warn).toHaveBeenCalledExactlyOnceWith(JSON.stringify({ event: "agent_groq", reason, upstreamStatus: status, ...(status === 400 ? { providerError: { code: "redacted" } } : {}) }));
-    expect(JSON.stringify(vi.mocked(console.warn).mock.calls) + JSON.stringify(body)).not.toContain(marker);
-    expect(JSON.stringify(vi.mocked(console.warn).mock.calls) + JSON.stringify(body)).not.toContain(key);
+    const emitted = JSON.stringify(vi.mocked(console.warn).mock.calls) + JSON.stringify(vi.mocked(console.info).mock.calls) + JSON.stringify(body);
+    expect(emitted).not.toContain(marker); expect(emitted).not.toContain(key);
   });
   it("diagnostica erro na segunda chamada sem emitir proposta", async () => {
     const { handlers, fetchMock } = setup([completion(), new Response('{"error":{"message":"fixture-private"}}', { status: 400 })]);
@@ -312,6 +328,13 @@ describe("retry limitado de tool_use_failed", () => {
     expect((await handlers.POST(request(body))).status).toBe(409);
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(console.warn).not.toHaveBeenCalled();
+    expect(attempts().filter((entry) => entry.outcome === "failed")).toEqual([expect.objectContaining({
+      phase: "planning", attempt: 1, call: 1, upstreamStatus: 400,
+      providerError: { code: "tool_use_failed", type: "invalid_request_error" }, retryScheduled: true,
+    })]);
+    expect(attempts().filter((entry) => entry.outcome === "started").map(({ phase, attempt, call }) => ({ phase, attempt, call }))).toEqual([
+      { phase: "planning", attempt: 1, call: 1 }, { phase: "planning", attempt: 2, call: 2 }, { phase: "confirmation", attempt: 1, call: 3 },
+    ]);
   });
   it("falha persistente nao executa failed_generation nem emite comprovante", async () => {
     const { handlers, fetchMock, bodies } = setup([failure(), failure(), completion()]);
@@ -323,7 +346,11 @@ describe("retry limitado de tool_use_failed", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(buying.createOperationalBuyingPlan).not.toHaveBeenCalled();
     expect(console.warn).toHaveBeenCalledExactlyOnceWith('{"event":"agent_groq","reason":"model_or_parameters_incompatible","upstreamStatus":400,"providerError":{"code":"tool_use_failed","type":"invalid_request_error"}}');
-    expect(JSON.stringify(vi.mocked(console.warn).mock.calls) + JSON.stringify(body) + JSON.stringify(bodies)).not.toMatch(/fixture-private|failed_generation|untrusted/);
+    expect(JSON.stringify(vi.mocked(console.warn).mock.calls) + JSON.stringify(vi.mocked(console.info).mock.calls) + JSON.stringify(body) + JSON.stringify(bodies)).not.toMatch(/fixture-private|failed_generation|untrusted/);
+    expect(attempts().filter((entry) => entry.outcome === "failed")).toEqual([
+      expect.objectContaining({ phase: "planning", attempt: 1, call: 1, retryScheduled: true, signalAborted: false }),
+      expect.objectContaining({ phase: "planning", attempt: 2, call: 2, retryScheduled: false, retryAvailable: false, signalAborted: false }),
+    ]);
   });
   it("resposta invalida apos retry nao inicia calculo nem uma terceira tentativa", async () => {
     const { handlers, fetchMock } = setup([failure(), completion(true, "{invalid"), completion()]);
@@ -340,6 +367,38 @@ describe("retry limitado de tool_use_failed", () => {
     expect(bodies.map((body) => body.temperature)).toEqual([0.2, 0.2, 0]);
     expect(bodies[2]).toEqual({ ...bodies[1], temperature: 0 });
     expect(buying.createOperationalBuyingPlan).toHaveBeenCalledTimes(1);
+    expect(attempts().filter((entry) => entry.outcome === "failed")).toEqual([
+      expect.objectContaining({ phase: "confirmation", attempt: 1, call: 2, toolChoice: "none", retryScheduled: true }),
+    ]);
+  });
+  it("distingue falha persistente na confirmacao e nao emite proposta revisavel", async () => {
+    const { handlers, fetchMock } = setup([completion(), failure(), failure()]);
+    const response = await handlers.POST(request(input()));
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body.action).toBeUndefined(); expect(body.reviewToken).toBeUndefined();
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(buying.createOperationalBuyingPlan).toHaveBeenCalledTimes(1);
+    expect(attempts().filter((entry) => entry.outcome === "failed")).toEqual([
+      expect.objectContaining({ phase: "confirmation", attempt: 1, call: 2, retryScheduled: true }),
+      expect.objectContaining({ phase: "confirmation", attempt: 2, call: 3, retryScheduled: false }),
+    ]);
+  });
+  it("correlacao e modelo dos logs nao copiam identificadores nem configuracao arbitraria", async () => {
+    const { handlers } = setup([failure(), failure()], "fixture-private");
+    const requestId = randomUUID();
+    await handlers.POST(request(input({ requestId, prompt: "fixture-private" })));
+    const log = attempts();
+    expect(new Set(log.map((entry) => entry.executionId)).size).toBe(1);
+    expect(log[0].executionId).toMatch(/^[a-f0-9-]{36}$/);
+    for (const entry of log) {
+      expect(entry).toMatchObject({ event: "agent_groq_attempt", diagnosticVersion: "phase-attempt-v1", model: "other", totalTimeoutMs: 30000 });
+      expect(entry.elapsedMs).toBeGreaterThanOrEqual(0);
+    }
+    expect(JSON.stringify(log)).not.toMatch(/fixture-private|failed_generation|untrusted/);
+    expect(JSON.stringify(log)).not.toContain(requestId);
+    expect(JSON.stringify(log)).not.toContain(key);
   });
   it("budget de retry e compartilhado entre chamada da ferramenta e confirmacao", async () => {
     const { handlers, fetchMock } = setup([failure(), completion(), failure(), completion(false)]);
@@ -348,6 +407,9 @@ describe("retry limitado de tool_use_failed", () => {
     expect(response.headers.get("set-cookie")).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(buying.createOperationalBuyingPlan).toHaveBeenCalledTimes(1);
+    expect(attempts().filter((entry) => entry.outcome === "failed").at(-1)).toMatchObject({
+      phase: "confirmation", attempt: 1, call: 3, retryScheduled: false, retryAvailable: false,
+    });
   });
   it.each([["invalid_request_error", 400], ["tool_use_failed", 422], ["tool_use_failed", 429], ["tool_use_failed", 500]])("nao repete outro erro: %s HTTP %i", async (code, status) => {
     const { handlers, fetchMock } = setup([failure(code, status), completion()]);
@@ -391,6 +453,9 @@ describe("retry limitado de tool_use_failed", () => {
       expect(create).toHaveBeenCalledTimes(2);
       expect(buying.createOperationalBuyingPlan).not.toHaveBeenCalled();
       expect(console.warn).toHaveBeenLastCalledWith('{"event":"agent_groq","reason":"provider_timeout"}');
+      const failures = attempts().filter((entry) => entry.outcome === "failed");
+      expect(failures[0]).toMatchObject({ phase: "planning", attempt: 1, elapsedMs: 29000, retryScheduled: true });
+      expect(failures[1]).toMatchObject({ phase: "planning", attempt: 2, elapsedMs: 30000, signalAborted: true, failureKind: "execution_aborted", retryScheduled: false });
     } finally { vi.useRealTimers(); }
   });
 });

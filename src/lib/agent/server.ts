@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { signAction, verifyAction, visitor } from "./receipts";
 import { protectAgent } from "./protection";
 import { executeDemoAgent } from "./execution";
+import { safeBadRequestFields, type ProviderErrorFields } from "./diagnostics";
 import { AGENT_LIMITS, AgentError, parseAgentRequest, parseReviewRequest } from "./contracts";
 import type { AgentAction, AgentReceipt } from "./contracts";
 
@@ -13,26 +14,6 @@ type GroqFailure = "api_key_missing" | "model_config_invalid" | "authentication_
   "model_or_parameters_incompatible" | "model_or_resource_not_found" | "provider_rate_limit" |
   "provider_timeout" | "provider_unavailable" | "provider_connection_error" | "execution_cancelled" |
   "tool_call_invalid" | "tool_arguments_invalid" | "tool_confirmation_invalid" | "execution_unknown";
-type ProviderErrorFields = Partial<Record<"code" | "type" | "param", string | null>>;
-function safeBadRequestFields(error: unknown): ProviderErrorFields | undefined {
-  if (!(error instanceof Groq.APIError) || error.status !== 400 || !error.error || typeof error.error !== "object") return;
-  const body = error.error as Record<string, unknown>;
-  // The installed SDK retains the JSON envelope in APIError.error.
-  const detail = body.error && typeof body.error === "object" ? body.error as Record<string, unknown> : body;
-  const allowed = {
-    code: ["tool_use_failed", "tool_call_validation_failed", "invalid_tool_call", "invalid_request_error", "invalid_parameter", "unsupported_parameter", "invalid_value", "model_not_found", "model_decommissioned", "context_length_exceeded", "json_validate_failed"],
-    type: ["invalid_request_error", "invalid_request", "validation_error", "invalid_parameter_error", "tool_use_error", "bad_request"],
-    param: ["model", "parallel_tool_calls", "reasoning_format", "reasoning_effort", "response_format", "tool_choice", "tools", "messages", "temperature", "max_completion_tokens", "store", "include_reasoning", "tools[0].function.name", "tools[0].function.parameters"],
-  };
-  const fields: ProviderErrorFields = {};
-  for (const field of ["code", "type", "param"] as const) {
-    const value = detail[field];
-    if (value === undefined) continue;
-    // Even structured provider fields can echo caller content. Never log unknown values.
-    fields[field] = value === null ? null : typeof value === "string" && allowed[field].includes(value) ? value : "redacted";
-  }
-  return Object.keys(fields).length ? fields : undefined;
-}
 function logGroqFailure(reason: GroqFailure, upstreamStatus?: number, providerError?: ProviderErrorFields) {
   // eslint-disable-next-line no-console -- Fixed diagnostic categories/status only; no provider/request payloads.
   console.warn(JSON.stringify({ event: "agent_groq", reason, ...(upstreamStatus === undefined ? {} : { upstreamStatus }), ...(providerError ? { providerError } : {}) }));
