@@ -211,6 +211,14 @@
 body { margin: 0; background: var(--background); color: var(--foreground); font-family: var(--font-inter), Arial, sans-serif; font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
 button, input, textarea, select { font: inherit; } button, a, select { -webkit-tap-highlight-color: transparent; }
 a { text-decoration: none; } button { cursor: pointer; } button:disabled, select:disabled { cursor: not-allowed; }
+/* Static application copy remains selectable; it is not a text editor.
+   Low-specificity exceptions preserve component cursors and presentation rules. */
+body { cursor: default; caret-color: transparent; }
+:where([contenteditable="false"]) { cursor: default; caret-color: transparent; }
+:where(a[href], button, summary, select, label[for], [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="checkbox"], [role="radio"], [role="switch"]) { cursor: pointer; }
+:where(input, textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]) { cursor: text; caret-color: auto; }
+:where(input[type="button"], input[type="submit"], input[type="reset"], input[type="checkbox"], input[type="radio"], input[type="range"], input[type="color"], input[type="file"]) { cursor: pointer; caret-color: transparent; }
+:where(input:disabled, textarea:disabled, [aria-disabled="true"]) { cursor: not-allowed; }
 :focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 5px; border-radius: 4px; }
 h1, h2, h3, p { margin: 0; } h1, h2, h3 { font-family: var(--font-jakarta), Arial, sans-serif; }
 .skip-link { position: fixed; top: -100px; left: 16px; z-index: 100; padding: 12px 20px; background: var(--brand-chartreuse); color: var(--on-lime); }.skip-link:focus { top: 12px; }

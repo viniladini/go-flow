@@ -140,7 +140,7 @@
     },
     {
       "path": "src/app/globals.css",
-      "sha256": "c6cb32dc64378d1e9edf7eea4707fcff5e4b1513c95b51807443a2f87faad030"
+      "sha256": "4454bc23d71e5cc3854d9cd39ec137ce31b675db162054686d2dede060ee05f9"
     },
     {
       "path": "src/app/icon.svg",
@@ -537,6 +537,10 @@
     {
       "path": "tests/unit/appearance.test.ts",
       "sha256": "dfa251a98a5f9efc4ee1b20cf5662db2d74b4910b234c49c700d0a6267581e49"
+    },
+    {
+      "path": "tests/unit/cursor.test.ts",
+      "sha256": "1f0e2860586da7be573804cedc55304a67d3ed7f24c34999b964a47fdaa8697a"
     },
     {
       "path": "tests/unit/dashboard-build.test.ts",
