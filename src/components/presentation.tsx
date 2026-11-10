@@ -119,32 +119,44 @@ export function Presentation({ children }: { children: ReactNode }) {
 
   useLayoutEffect(() => {
     const button = skipButton.current, root = dialog.current;
-    if (!button || !root || !sceneNoticeVisible) return;
-    const paint = () => {
-      const colors = presentationColors(screen.scene);
-      button.style.setProperty("--skip-background", colors["--scene-background"]);
-      button.style.setProperty("--skip-ink", colors["--scene-ink"]);
-      button.dataset.palette = PRESENTATION_PALETTE[screen.scene];
+    const label = button?.querySelector<HTMLElement>(".presentation-skip-label");
+    if (!button || !label || !root) return;
+    const clearPaint = () => {
+      delete button.dataset.revealing;
+      for (const property of ["--skip-reveal-paint", "--skip-paint-size", "--skip-label-position"]) button.style.removeProperty(property);
     };
-    if (reduce || screen.previous === null) { paint(); return; }
     const incoming = root.querySelector<HTMLElement>(".cinematic-stage > .presentation-scene:not(.outgoing)");
-    let frame: number;
+    const iris = revealing ? root.querySelector<HTMLElement>(".presentation-iris") : null;
+    if ((!sceneNoticeVisible && !iris) || !incoming) { clearPaint(); button.style.removeProperty("--skip-ink"); return; }
+    const canvasStyle = getComputedStyle(incoming), targetInk = canvasStyle.color;
+    if (reduce || (!iris && (!canvasStyle.clipPath || canvasStyle.clipPath === "none"))) { clearPaint(); button.style.setProperty("--skip-ink", targetInk); return; }
+    const outgoing = root.querySelector<HTMLElement>(".cinematic-stage > .outgoing");
+    const sourceInk = outgoing ? getComputedStyle(outgoing).color : getComputedStyle(button).color;
+    button.style.setProperty("--skip-ink", sourceInk);
+    let frame: number | undefined;
     const followMask = () => {
-      const box = button.getBoundingClientRect();
-      // Native hit testing respects the actual animated clip-path (including
-      // rounded/elliptical masks). Switch the opaque button as one unit only
-      // when its entire box belongs to the incoming canvas. No text clones,
-      // color tween, estimated animation progress or independent timer.
-      const covered = incoming && box.width > 1 && box.height > 1 &&
-        [box.left + .5, box.right - .5].every((x) =>
-          [box.top + .5, box.bottom - .5].every((y) =>
-            document.elementsFromPoint?.(x, y).includes(incoming)));
-      if (covered) { paint(); return; }
+      const canvas = incoming.getBoundingClientRect(), box = button.getBoundingClientRect(), text = label.getBoundingClientRect();
+      const circle = iris?.getBoundingClientRect();
+      const clip = circle ? `circle(${circle.width / 2}px at ${circle.left + circle.width / 2 - canvas.left}px ${circle.top + circle.height / 2 - canvas.top}px)` : getComputedStyle(incoming).clipPath;
+      if (!circle && (!clip || clip === "none")) { clearPaint(); button.style.setProperty("--skip-ink", targetInk); return; }
+      if (box.width && box.height && canvas.width && canvas.height) {
+        // Reuse the browser's interpolated mask verbatim, in the same viewport
+        // coordinates. This tiny ink image contains NO text: one natural-size
+        // HTML label and one border sample it. Even a mask crossing a glyph is
+        // spatially correct, rather than switching the whole button at a threshold.
+        // Crop to the button (+ its existing hover ring), never a viewport bitmap.
+        const width = box.width + 4, height = box.height + 4;
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="${sourceInk}"/><svg x="${canvas.left - box.left + 2}" y="${canvas.top - box.top + 2}" width="${canvas.width}" height="${canvas.height}" viewBox="0 0 ${canvas.width} ${canvas.height}"><rect width="100%" height="100%" fill="${targetInk}" style="clip-path:${clip || "none"}"/></svg></svg>`;
+        button.style.setProperty("--skip-reveal-paint", `url("data:image/svg+xml,${encodeURIComponent(svg)}")`);
+        button.style.setProperty("--skip-paint-size", `${width}px ${height}px`);
+        button.style.setProperty("--skip-label-position", `${box.left - text.left - 2}px ${box.top - text.top - 2}px`);
+        button.dataset.revealing = "true";
+      }
       frame = window.requestAnimationFrame(followMask);
     };
     followMask();
-    return () => window.cancelAnimationFrame(frame);
-  }, [screen.scene, screen.previous, sceneNoticeVisible, reduce]);
+    return () => { if (frame !== undefined) window.cancelAnimationFrame(frame); clearPaint(); };
+  }, [screen.mode, screen.scene, screen.previous, sceneNoticeVisible, revealing, reduce]);
 
   useEffect(() => {
     if (screen.mode !== "handoff" || screen.covered) return;
@@ -326,7 +338,7 @@ export function Presentation({ children }: { children: ReactNode }) {
   const chromePaletteIndex = screen.previous ?? screen.scene;
   const renderWordmark = (compact = false) => <div className="splash-wordmark" data-frame={compact ? 1 : screen.frame} aria-hidden="true"><span>go<span className="splash-dot">.</span></span><span className="splash-flow">flow</span></div>;
   const renderContents = (clone = false) => screen.mode === "closed" ? null : shortOpening ? <div className="presentation-splash presentation-returning" aria-label="go.flow">{renderWordmark(true)}</div> : <>
-      <header className="presentation-header" data-chrome-anchor="header">{(screen.mode === "splash" && !revealing) || screen.splashExit ? <span className="splash-signature">gogroup</span> : <span className="scene-caption">{sceneCaptions[screen.scene]}</span>}<div className="presentation-header-right">{(screen.mode !== "splash" || revealing) && <ol className="scene-dots" aria-label="Progresso da apresentação">{PRESENTATION_SCENES.map((item, index) => <li key={item.title} aria-current={index === screen.scene ? "step" : undefined}><span className="sr-only">{index + 1}: {item.title}</span></li>)}</ol>}<button ref={skipButton} className="presentation-skip" onClick={skip}>{screen.mode === "handoff" ? "Voltar à aplicação" : "Pular apresentação"}</button></div></header>
+      <header className="presentation-header" data-chrome-anchor="header">{(screen.mode === "splash" && !revealing) || screen.splashExit ? <span className="splash-signature">gogroup</span> : <span className="scene-caption">{sceneCaptions[screen.scene]}</span>}<div className="presentation-header-right">{(screen.mode !== "splash" || revealing) && <ol className="scene-dots" aria-label="Progresso da apresentação">{PRESENTATION_SCENES.map((item, index) => <li key={item.title} aria-current={index === screen.scene ? "step" : undefined}><span className="sr-only">{index + 1}: {item.title}</span></li>)}</ol>}<button ref={skipButton} className="presentation-skip" onClick={skip}><span className="presentation-skip-label">{screen.mode === "handoff" ? "Voltar à aplicação" : "Pular apresentação"}</span></button></div></header>
       <p className="presentation-slogan" data-chrome-anchor="slogan" key={`${clone ? "handoff" : "dialog"}:slogan`}><span>From insight to action.</span></p>
       <div className="presentation-curves" aria-hidden="true"><svg viewBox="0 0 400 400" fill="none"><path d="M-30 340H90C240 340 120 80 300 80H430" /><path d="M-30 390H120C280 390 160 130 330 130H430" /><circle cx="300" cy="80" r="12" /></svg></div>
       <svg className="signature-connector" viewBox="0 0 400 400" fill="none" aria-hidden="true"><path d="M-30 340H90C240 340 120 80 300 80H430" /><circle cx="300" cy="80" r="7" /></svg>

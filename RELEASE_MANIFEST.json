@@ -164,7 +164,7 @@
     },
     {
       "path": "src/app/signature-motion.css",
-      "sha256": "705f18a909b4b2e211226caeb98e1aff0f54d3d656fbd502352c97991f5c59c7"
+      "sha256": "acc3967d08c298850f73b7b64f72822ff513d1ec06f51f26ffe3d26e1e94e547"
     },
     {
       "path": "src/components/agent-analysis.tsx",
@@ -220,7 +220,7 @@
     },
     {
       "path": "src/components/presentation.tsx",
-      "sha256": "9e4336d5bf465d342bc48376b11a9f135f7885ba7113e7e32eb97d758c82258d"
+      "sha256": "78c7c0f6996bf4f7832446a6e4a5f4326492815a74b9d4a379162247654e0cca"
     },
     {
       "path": "src/components/product-flow.tsx",
@@ -592,7 +592,7 @@
     },
     {
       "path": "tests/unit/presentation.test.tsx",
-      "sha256": "16d0f11f8c1cf1d412b0de114057ed2aabd1c84bd71e895ae60e4a8810fbeb71"
+      "sha256": "c36675596a89b5b60b60b506f94a4336682096fdc059bdba00311be3bf0341cb"
     },
     {
       "path": "tests/unit/public-release.test.ts",
