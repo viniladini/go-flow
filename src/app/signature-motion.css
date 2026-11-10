@@ -94,7 +94,12 @@
 #goflow-presentation button.presentation-skip {
   position: relative; padding: 11px 20px; transform: none; animation: none;
   --skip-effective-ink: var(--skip-ink, var(--on-brand));
-  background: transparent; color: var(--skip-effective-ink); border: 1px solid var(--skip-effective-ink); opacity: 1;
+  background: transparent;
+  color: var(--skip-effective-ink);
+  /* Reserve the same geometry in every state; one SVG owns the visible stroke. */
+  border: 2px solid transparent;
+  font-weight: 600;
+  opacity: 1;
   border-radius: var(--radius-control); min-height: 44px; box-sizing: border-box;
   transition: box-shadow var(--motion-quick);
 }
@@ -103,7 +108,7 @@
   background: transparent;
 }
 #goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"])[data-palette="lime"] button.presentation-skip { --skip-default-ink: var(--presentation-skip-first-ink); }
-#goflow-presentation button.presentation-skip:hover { background: transparent; }
+#goflow-presentation button.presentation-skip:hover { background: transparent; box-shadow: none; }
 /* Use the same single glyph paint path at rest and in motion. Switching between
    native text and clipped background text changed antialiasing/intensity. */
 #goflow-presentation .presentation-skip-label {
@@ -112,17 +117,13 @@
   background-size: var(--skip-paint-size, 100% 100%); background-position: var(--skip-label-position, 0 0); background-repeat: no-repeat;
   -webkit-background-clip: text; background-clip: text;
 }
-#goflow-presentation button.presentation-skip[data-revealing] { border-color: transparent; }
-#goflow-presentation button.presentation-skip[data-revealing]::before {
-  content: ""; position: absolute; inset: var(--skip-ring-inset, -1px);
-  padding: calc(0px - var(--skip-ring-inset, -1px));
-  border-radius: calc(var(--radius-control) - 1px - var(--skip-ring-inset, -1px));
-  background-image: var(--skip-reveal-paint); background-size: var(--skip-paint-size);
-  background-position: calc(-3px - var(--skip-ring-inset, -1px)) calc(-3px - var(--skip-ring-inset, -1px)); background-repeat: no-repeat;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none;
-  transition: inset var(--motion-quick), padding var(--motion-quick), border-radius var(--motion-quick), background-position var(--motion-quick);
+#goflow-presentation .presentation-skip-border {
+  position: absolute; left: -2px; top: -2px; width: calc(100% + 4px); height: calc(100% + 4px);
+  pointer-events: none; overflow: visible; opacity: 1;
+}
+#goflow-presentation .presentation-skip-outline {
+  width: calc(100% - 2px); height: calc(100% - 2px); rx: calc(var(--radius-control) - 1px);
+  stroke-width: 2px; fill: none; opacity: 1; transition: none; animation: none;
 }
 #goflow-presentation button.presentation-skip:focus-visible { outline-color: var(--skip-effective-ink); }
 #goflow-presentation .scene-chrome-slogan {
@@ -231,9 +232,7 @@ html[data-route-motion="return"] { --route-origin: scale(.995); }
   #goflow-presentation .presentation-choice:hover { transform: translateY(-3px); box-shadow: 0 8px 0 color-mix(in srgb, var(--scene-ink) 12%, transparent); }
   #goflow-presentation .presentation-choice:first-child:hover { background: var(--scene-hover); color: var(--scene-buttonInk); }
   #goflow-presentation .presentation-choice:nth-child(2):hover { background: var(--scene-ink); color: var(--scene-background); }
-  #goflow-presentation :is(.presentation-skip, .presentation-footer button):hover { box-shadow: 0 0 0 2px var(--scene-ink); }
-  #goflow-presentation button.presentation-skip:hover { box-shadow: 0 0 0 2px var(--skip-effective-ink); }
-  #goflow-presentation button.presentation-skip[data-revealing]:hover { --skip-ring-inset: -3px; box-shadow: none; }
+  #goflow-presentation .presentation-footer button:hover { box-shadow: 0 0 0 2px var(--scene-ink); }
   .shell-navigation .nav-item:not([data-selected]):hover { background: var(--sidebar-hover); transform: none; }
   .workspace-shell :is(a.panel, a.metric-card, a.agent-card):hover { transform: translateY(-2px); border-color: var(--accent); }
 }

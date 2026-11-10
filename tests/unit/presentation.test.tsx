@@ -97,12 +97,14 @@ describe("experiência de apresentação", () => {
     const globals = readFileSync(resolve("src/app/globals.css"), "utf8");
     // Exercise the real legacy cascade too. Attribute substitutes for :hover
     // test CSS specificity without claiming pointer/compositor browser coverage.
-    stylesheet.textContent = (globals.slice(globals.indexOf(":root")) + readFileSync(resolve("src/app/signature-motion.css"), "utf8")).replaceAll(":hover", "[data-test-hover]");
+    stylesheet.textContent = (globals.slice(globals.indexOf(":root")) + readFileSync(resolve("src/app/signature-motion.css"), "utf8")).replaceAll(":hover", "[data-test-hover]").replaceAll(":focus-visible", "[data-test-focus]");
     document.head.append(stylesheet);
     try {
       await mount();
       const skip = dialog().querySelector<HTMLButtonElement>("button.presentation-skip")!;
-      Object.assign(skip.style, { fontFamily: '"Fixture Inter"', fontSize: "11px", fontWeight: "400", lineHeight: "16.5px" });
+      const border = skip.querySelector<SVGSVGElement>(".presentation-skip-border")!;
+      const outline = border.querySelector<SVGRectElement>(".presentation-skip-outline")!;
+      Object.assign(skip.style, { fontFamily: '"Fixture Inter"', fontSize: "11px", lineHeight: "16.5px" });
       const box = vi.spyOn(skip, "getBoundingClientRect").mockReturnValue(new DOMRect(800, 20, 160, 44));
       const check = () => {
         expect(dialog().querySelectorAll(".presentation-skip")).toHaveLength(1);
@@ -113,14 +115,28 @@ describe("experiência de apresentação", () => {
         expect(style.transform).toBe("none"); expect(style.animation).toBe("none");
         expect(style.paddingLeft).toBe("20px"); expect(style.paddingRight).toBe("20px");
         expect(style.paddingTop).toBe("11px"); expect(style.paddingBottom).toBe("11px");
-        expect(style.borderTopWidth).toBe("1px"); expect(style.borderTopStyle).toBe("solid");
-        expect(style.borderTopColor).not.toBe("transparent"); expect(style.backgroundColor).toBe("transparent");
+        expect(style.borderTopWidth).toBe("2px"); expect(style.borderTopStyle).toBe("solid");
+        expect(style.borderTopColor).toBe("transparent"); expect(style.backgroundColor).toBe("transparent");
+        expect(skip.querySelector(".presentation-skip-border")).toBe(border);
+        expect(border.querySelector(".presentation-skip-outline")).toBe(outline);
+        expect(border.getAttribute("aria-hidden")).toBe("true"); expect(border.getAttribute("focusable")).toBe("false");
+        expect(getComputedStyle(outline).strokeWidth).toBe("2px");
+        expect(outline.getAttribute("stroke-width")).toBe("2");
+        expect(outline.getAttribute("vector-effect")).toBe("non-scaling-stroke");
+        expect(getComputedStyle(border).opacity).toBe("1"); expect(getComputedStyle(outline).opacity).toBe("1");
         expect(style.borderRadius).toBe("10px"); expect(style.minHeight).toBe("44px");
         skip.setAttribute("data-test-hover", "");
         expect(getComputedStyle(skip).backgroundColor).toBe("transparent");
+        expect(getComputedStyle(skip).boxShadow).toBe("none");
+        expect(getComputedStyle(outline).strokeWidth).toBe("2px");
         skip.removeAttribute("data-test-hover");
+        skip.focus(); skip.setAttribute("data-test-focus", "");
+        expect(document.activeElement).toBe(skip);
+        expect(getComputedStyle(skip).outlineWidth).toBe("3px");
+        expect(getComputedStyle(outline).strokeWidth).toBe("2px");
+        skip.removeAttribute("data-test-focus");
         expect(skip.tabIndex).toBe(0); expect(skip.closest("[inert]")).toBeNull();
-        expect(style.fontSize).toBe(skip.style.fontSize); expect(style.fontWeight).toBe("400");
+        expect(style.fontSize).toBe(skip.style.fontSize); expect(style.fontWeight).toBe("600");
         for (const canvas of dialog().querySelectorAll(".presentation-scene")) {
           expect(canvas.textContent).not.toContain("Pular apresentação");
           const slot = canvas.querySelector<HTMLElement>(".scene-chrome-skip-space")!;
@@ -142,6 +158,32 @@ describe("experiência de apresentação", () => {
       expect(dialog().open).toBe(false);
     } finally { stylesheet.remove(); }
   });
+  it("data-revealing e ausencia da imagem de tinta nao retiram o contorno SVG de 2px", async () => {
+    const stylesheet = document.createElement("style");
+    const motion = readFileSync(resolve("src/app/signature-motion.css"), "utf8");
+    stylesheet.textContent = readFileSync(resolve("src/app/globals.css"), "utf8").match(/:root\s*\{[^}]+\}/)![0] + motion;
+    document.head.append(stylesheet);
+    try {
+      await mount(); await click("Conheça");
+      const skip = dialog().querySelector<HTMLButtonElement>(".presentation-skip")!;
+      const outline = skip.querySelector<SVGRectElement>(".presentation-skip-outline")!;
+      for (const revealing of [false, true, false, true]) {
+        skip.toggleAttribute("data-revealing", revealing);
+        skip.style.removeProperty("--skip-reveal-paint");
+        expect(skip.querySelector(".presentation-skip-outline")).toBe(outline);
+        expect(outline.getAttribute("stroke")).toBe("url(#goflow-skip-border-ink)");
+        expect(outline.getAttribute("fill")).toBe("none");
+        expect(outline.getAttribute("x")).toBe("1"); expect(outline.getAttribute("y")).toBe("1");
+        expect(getComputedStyle(outline).strokeWidth).toBe("2px");
+        expect(getComputedStyle(outline).opacity).toBe("1");
+        expect(skip.querySelector("[data-skip-border-base]")!.getAttribute("fill")).toBe("#000");
+        expect(getComputedStyle(skip).fontWeight).toBe("600");
+      }
+      expect(motion).not.toContain("button.presentation-skip[data-revealing]::before");
+      expect(motion).not.toContain("--skip-ring-inset");
+      expect(motion).not.toContain("mask-composite");
+    } finally { stylesheet.remove(); }
+  });
   it.each([false, true])("primeira cena usa preto explicito e o mesmo glifo opaco, reduced motion %s", async (reduced) => {
     reduce = reduced;
     const stylesheet = document.createElement("style");
@@ -155,7 +197,7 @@ describe("experiência de apresentação", () => {
       const connector = dialog().querySelector(".signature-connector")!;
       const check = () => {
         expect(getComputedStyle(skip).color.toUpperCase()).toBe("#000");
-        expect(getComputedStyle(skip).borderTopColor.toUpperCase()).toBe("#000");
+        expect(skip.querySelector("[data-skip-border-base]")!.getAttribute("fill")!.toUpperCase()).toBe("#000");
         expect(getComputedStyle(skip).backgroundColor).toBe("transparent");
         const style = getComputedStyle(label);
         expect(style.backgroundImage).toContain("#000"); expect(style.backgroundClip).toBe("text");
@@ -194,15 +236,19 @@ describe("experiência de apresentação", () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
       if (this.matches(".presentation-scene")) return new DOMRect(0, 0, width, 800);
       if (this.matches(".presentation-skip")) return new DOMRect(buttonX, 20, 200, 44);
-      if (this.matches(".presentation-skip-label")) return new DOMRect(buttonX + 21, 33, 158, 18);
+      if (this.matches(".presentation-skip-label")) return new DOMRect(buttonX + 22, 33, 156, 18);
       return new DOMRect();
     });
     try {
       await mount(); await click("Conheça");
       const skip = dialog().querySelector<HTMLButtonElement>(".presentation-skip")!;
       const label = skip.querySelector<HTMLElement>(".presentation-skip-label")!;
-      skip.style.fontWeight = "400";
       const connector = dialog().querySelector<SVGSVGElement>(".signature-connector")!;
+      const border = skip.querySelector<SVGSVGElement>(".presentation-skip-border")!;
+      const outline = border.querySelector<SVGRectElement>(".presentation-skip-outline")!;
+      const borderBase = border.querySelector("[data-skip-border-base]")!;
+      const borderViewport = border.querySelector("[data-skip-border-viewport]")!;
+      const borderReveal = borderViewport.querySelector<SVGRectElement>("rect")!;
       const path = connector.querySelector("path")!, circle = connector.querySelector("circle")!;
       const base = connector.querySelector("[data-connector-base]")!;
       const reveal = connector.querySelector("[data-connector-reveal]")!;
@@ -239,16 +285,28 @@ describe("experiência de apresentação", () => {
           expect(rects[0].getAttribute("fill")!.toUpperCase()).toBe(inks[previous]);
           expect(rects[1].getAttribute("fill")!.toUpperCase()).toBe(inks[next]);
           expect(rects[1].getAttribute("style")).toBe(`clip-path:${mask}`);
+          expect(skip.querySelector(".presentation-skip-outline")).toBe(outline);
+          expect(skip.querySelectorAll(".presentation-skip-outline")).toHaveLength(1);
+          expect(borderBase.getAttribute("fill")!.toUpperCase()).toBe(inks[previous]);
+          expect(borderReveal.getAttribute("fill")!.toUpperCase()).toBe(inks[next]);
+          expect(borderReveal.style.clipPath).toBe(mask);
+          expect(borderViewport.getAttribute("visibility")).toBe("visible");
+          expect(borderViewport.getAttribute("x")).toBe(String(-buttonX));
+          expect(borderViewport.getAttribute("y")).toBe("-20");
+          expect(borderViewport.getAttribute("viewBox")).toBe(`0 0 ${width} 800`);
+          expect(getComputedStyle(outline).strokeWidth).toBe("2px");
+          expect(getComputedStyle(outline).opacity).toBe("1");
+          expect(getComputedStyle(skip).borderTopColor).toBe("transparent");
           expect(image.querySelector("[opacity], [fill-opacity], [mask], text")).toBeNull();
           expect(image.documentElement.getAttribute("width")).toBe("204");
           expect(image.querySelector("svg svg")!.getAttribute("x")).toBe(String(-buttonX + 2));
-          expect(skip.style.getPropertyValue("--skip-label-position")).toBe("-23px -15px");
+          expect(skip.style.getPropertyValue("--skip-label-position")).toBe("-24px -15px");
           expect(getComputedStyle(skip).backgroundColor).toBe("transparent");
           expect(getComputedStyle(label).color).toBe("transparent");
           expect(getComputedStyle(label).backgroundClip).toBe("text");
           expect(getComputedStyle(label).opacity).toBe("1");
           expect(getComputedStyle(skip).opacity).toBe("1");
-          expect(getComputedStyle(label).fontWeight).toBe("400");
+          expect(getComputedStyle(label).fontWeight).toBe("600");
           expect(getComputedStyle(label).animation).toBe("none");
           expect(getComputedStyle(label).transition).toBe("none");
           expect(label.textContent).toBe("Pular apresentação");
@@ -269,13 +327,17 @@ describe("experiência de apresentação", () => {
         clip = "none"; await tick(16);
         expect(dialog().querySelector(".outgoing")).not.toBeNull();
         expect(skip.hasAttribute("data-revealing")).toBe(false);
+        expect(borderBase.getAttribute("fill")!.toUpperCase()).toBe(inks[next]);
+        expect(borderViewport.getAttribute("visibility")).toBe("hidden");
+        expect(border.querySelector(".presentation-skip-outline")).toBe(outline);
+        expect(getComputedStyle(outline).strokeWidth).toBe("2px");
         expect(base.getAttribute("fill")!.toUpperCase()).toBe(accents[next]);
         expect(reveal.getAttribute("visibility")).toBe("hidden");
         await tick(SCENE_TRANSITION_MS);
         expect(skip.hasAttribute("data-revealing")).toBe(false);
         expect(skip.style.getPropertyValue("--skip-reveal-paint")).toBe("");
         expect(getComputedStyle(skip).color.toUpperCase()).toBe(inks[next]);
-        expect(getComputedStyle(skip).borderTopWidth).toBe("1px");
+        expect(getComputedStyle(skip).borderTopWidth).toBe("2px");
         expect(getComputedStyle(skip).backgroundColor).toBe("transparent");
         // Same glyph compositing before/during/after; only its opaque ink changes.
         expect(getComputedStyle(label).backgroundClip).toBe("text");
@@ -294,13 +356,13 @@ describe("experiência de apresentação", () => {
       if (this.matches(".presentation-scene")) return new DOMRect(0, 0, 1200, 800);
       if (this.matches(".presentation-iris")) return new DOMRect(600 - radius, 400 - radius, radius * 2, radius * 2);
       if (this.matches(".presentation-skip")) return new DOMRect(900, 20, 200, 44);
-      if (this.matches(".presentation-skip-label")) return new DOMRect(921, 33, 158, 18);
+      if (this.matches(".presentation-skip-label")) return new DOMRect(922, 33, 156, 18);
       return new DOMRect();
     });
     try {
       await mount();
       const skip = dialog().querySelector<HTMLButtonElement>(".presentation-skip")!;
-      expect(getComputedStyle(skip).borderTopWidth).toBe("1px");
+      expect(getComputedStyle(skip).borderTopWidth).toBe("2px");
       const enter = [...dialog().querySelectorAll("button")].find(b => b.textContent?.includes("Conheça"))!;
       await act(async () => enter.click());
       for (radius of [10, 250, 500, 800]) {
@@ -313,7 +375,7 @@ describe("experiência de apresentação", () => {
       await tick(IRIS_EXPANSION_MS);
       expect(skip.hasAttribute("data-revealing")).toBe(false);
       expect(getComputedStyle(skip).color.toUpperCase()).toBe("#000");
-      expect(getComputedStyle(skip).borderTopWidth).toBe("1px");
+      expect(getComputedStyle(skip).borderTopWidth).toBe("2px");
     } finally { stylesheet.remove(); }
   });
   it("interrupcao substitui a pintura anterior; pular cancela os frames sem esperar a mascara", async () => {
@@ -332,6 +394,7 @@ describe("experiência de apresentação", () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 200, 44));
     const skip = dialog().querySelector<HTMLButtonElement>(".presentation-skip")!;
     const connector = dialog().querySelector(".signature-connector")!, path = connector.querySelector("path")!;
+    const outline = skip.querySelector(".presentation-skip-outline")!;
     const frame = vi.spyOn(window, "requestAnimationFrame");
     const cancel = vi.spyOn(window, "cancelAnimationFrame");
     await act(async () => dialog().querySelector<HTMLButtonElement>(".scene-next")!.click());
@@ -340,18 +403,24 @@ describe("experiência de apresentação", () => {
     expect(cancel).toHaveBeenCalledWith(first);
     expect(dialog().querySelector(".signature-connector")).toBe(connector);
     expect(connector.querySelector("path")).toBe(path);
+    expect(skip.querySelector(".presentation-skip-outline")).toBe(outline);
+    expect(outline.getAttribute("stroke-width")).toBe("2");
     expect(skip.hasAttribute("data-revealing")).toBe(true);
     await act(async () => skip.click());
     expect(dialog().dataset.mode).toBe("handoff"); expect(skip.hasAttribute("data-revealing")).toBe(false);
     const count = frame.mock.calls.length; await tick(120);
     expect(dialog().open).toBe(false); expect(frame).toHaveBeenCalledTimes(count);
   });
-  it("reduced motion usa apenas contorno e texto nativos sem pintura intermediaria", async () => {
+  it("reduced motion conserva o mesmo contorno SVG sem pintura intermediaria", async () => {
     reduce = true; await mount(); await click("Conheça");
     const frame = vi.spyOn(window, "requestAnimationFrame");
+    const outline = dialog().querySelector(".presentation-skip-outline")!;
     for (let index = 1; index < 5; index++) {
       await act(async () => dialog().querySelector<HTMLButtonElement>(".scene-next")!.click());
       const skip = dialog().querySelector<HTMLButtonElement>(".presentation-skip")!;
+      expect(skip.querySelector(".presentation-skip-outline")).toBe(outline);
+      expect(outline.getAttribute("stroke-width")).toBe("2");
+      expect(skip.querySelector("[data-skip-border-viewport]")!.getAttribute("visibility")).toBe("hidden");
       expect(skip.hasAttribute("data-revealing")).toBe(false);
       expect(skip.style.getPropertyValue("--skip-reveal-paint")).toBe("");
       expect(dialog().querySelector(".outgoing")).toBeNull();

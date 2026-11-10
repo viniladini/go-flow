@@ -121,6 +121,9 @@ export function Presentation({ children }: { children: ReactNode }) {
     const button = skipButton.current, root = dialog.current;
     const label = button?.querySelector<HTMLElement>(".presentation-skip-label");
     if (!button || !label || !root) return;
+    const borderBase = button.querySelector<SVGRectElement>("[data-skip-border-base]");
+    const borderViewport = button.querySelector<SVGSVGElement>("[data-skip-border-viewport]");
+    const borderReveal = borderViewport?.querySelector<SVGRectElement>("rect");
     const connector = root.querySelector<SVGSVGElement>(".signature-connector");
     const base = connector?.querySelector<SVGRectElement>("[data-connector-base]");
     const reveal = connector?.querySelector<SVGGElement>("[data-connector-reveal]");
@@ -133,17 +136,19 @@ export function Presentation({ children }: { children: ReactNode }) {
       const token = kind === "ink" && scene.dataset.scene === "0" ? "presentation-skip-first-ink" : colors[kind];
       return rootStyle.getPropertyValue(`--${token}`).trim() || tokens.getPropertyValue(`--${token}`).trim();
     };
-    const clearPaint = (settledAccent?: string) => {
+    const clearPaint = (settledAccent?: string, settledInk?: string) => {
       delete button.dataset.revealing;
       for (const property of ["--skip-reveal-paint", "--skip-paint-size", "--skip-label-position"]) button.style.removeProperty(property);
       if (settledAccent) base?.setAttribute("fill", settledAccent);
       reveal?.setAttribute("visibility", "hidden");
+      if (settledInk) borderBase?.setAttribute("fill", settledInk);
+      borderViewport?.setAttribute("visibility", "hidden");
     };
     const incoming = root.querySelector<HTMLElement>(".cinematic-stage > .presentation-scene:not(.outgoing)");
     const iris = revealing ? root.querySelector<HTMLElement>(".presentation-iris") : null;
     if ((!sceneNoticeVisible && !iris) || !incoming) { clearPaint(); button.style.removeProperty("--skip-ink"); return; }
     const canvasStyle = getComputedStyle(incoming), targetInk = sceneColor(incoming, "ink"), targetAccent = sceneColor(incoming, "accent");
-    if (reduce || (!iris && (!canvasStyle.clipPath || canvasStyle.clipPath === "none"))) { clearPaint(targetAccent); button.style.setProperty("--skip-ink", targetInk); return; }
+    if (reduce || (!iris && (!canvasStyle.clipPath || canvasStyle.clipPath === "none"))) { clearPaint(targetAccent, targetInk); button.style.setProperty("--skip-ink", targetInk); return; }
     const outgoing = root.querySelector<HTMLElement>(".cinematic-stage > .outgoing");
     const sourceInk = outgoing ? sceneColor(outgoing, "ink") : getComputedStyle(button).color;
     const sourceAccent = outgoing ? sceneColor(outgoing, "accent") : base?.getAttribute("fill") || targetAccent;
@@ -153,7 +158,17 @@ export function Presentation({ children }: { children: ReactNode }) {
       const canvas = incoming.getBoundingClientRect(), box = button.getBoundingClientRect(), text = label.getBoundingClientRect();
       const circle = iris?.getBoundingClientRect();
       const clip = circle ? `circle(${circle.width / 2}px at ${circle.left + circle.width / 2 - canvas.left}px ${circle.top + circle.height / 2 - canvas.top}px)` : getComputedStyle(incoming).clipPath;
-      if (!circle && (!clip || clip === "none")) { clearPaint(targetAccent); button.style.setProperty("--skip-ink", targetInk); return; }
+      if (!circle && (!clip || clip === "none")) { clearPaint(targetAccent, targetInk); button.style.setProperty("--skip-ink", targetInk); return; }
+      // The same SVG stroke exists at rest and in motion. Its opaque paint
+      // server follows the scene mask; no native/pseudo-element handoff and
+      // no asynchronously decoded image is needed to keep the border visible.
+      if (borderBase && borderViewport && borderReveal) {
+        borderBase.setAttribute("fill", sourceInk);
+        borderReveal.setAttribute("fill", targetInk); borderReveal.style.clipPath = clip || "none";
+        for (const [name, value] of Object.entries({ x: canvas.left - box.left, y: canvas.top - box.top, width: canvas.width, height: canvas.height })) borderViewport.setAttribute(name, String(value));
+        borderViewport.setAttribute("viewBox", `0 0 ${canvas.width} ${canvas.height}`);
+        borderViewport.setAttribute("visibility", "visible");
+      }
       // One persistent path/circle, with opaque ink supplied by a paint server.
       // Inverse CTM maps the real viewport mask into the moving SVG's space.
       // The path's existing transform/opacity never restarts or changes owner.
@@ -365,7 +380,7 @@ export function Presentation({ children }: { children: ReactNode }) {
   const chromePaletteIndex = screen.previous ?? screen.scene;
   const renderWordmark = (compact = false) => <div className="splash-wordmark" data-frame={compact ? 1 : screen.frame} aria-hidden="true"><span>go<span className="splash-dot">.</span></span><span className="splash-flow">flow</span></div>;
   const renderContents = (clone = false) => screen.mode === "closed" ? null : shortOpening ? <div className="presentation-splash presentation-returning" aria-label="go.flow">{renderWordmark(true)}</div> : <>
-      <header className="presentation-header" data-chrome-anchor="header">{(screen.mode === "splash" && !revealing) || screen.splashExit ? <span className="splash-signature">gogroup</span> : <span className="scene-caption">{sceneCaptions[screen.scene]}</span>}<div className="presentation-header-right">{(screen.mode !== "splash" || revealing) && <ol className="scene-dots" aria-label="Progresso da apresentação">{PRESENTATION_SCENES.map((item, index) => <li key={item.title} aria-current={index === screen.scene ? "step" : undefined}><span className="sr-only">{index + 1}: {item.title}</span></li>)}</ol>}<button ref={skipButton} className="presentation-skip" onClick={skip}><span className="presentation-skip-label">{screen.mode === "handoff" ? "Voltar à aplicação" : "Pular apresentação"}</span></button></div></header>
+      <header className="presentation-header" data-chrome-anchor="header">{(screen.mode === "splash" && !revealing) || screen.splashExit ? <span className="splash-signature">gogroup</span> : <span className="scene-caption">{sceneCaptions[screen.scene]}</span>}<div className="presentation-header-right">{(screen.mode !== "splash" || revealing) && <ol className="scene-dots" aria-label="Progresso da apresentação">{PRESENTATION_SCENES.map((item, index) => <li key={item.title} aria-current={index === screen.scene ? "step" : undefined}><span className="sr-only">{index + 1}: {item.title}</span></li>)}</ol>}<button ref={skipButton} className="presentation-skip" onClick={skip}><svg className="presentation-skip-border" aria-hidden="true" focusable="false"><defs><pattern id="goflow-skip-border-ink" patternUnits="userSpaceOnUse" width="100%" height="100%"><rect data-skip-border-base width="100%" height="100%" fill="var(--skip-effective-ink)" /><svg data-skip-border-viewport visibility="hidden"><rect width="100%" height="100%" /></svg></pattern></defs><rect className="presentation-skip-outline" x="1" y="1" fill="none" stroke="url(#goflow-skip-border-ink)" strokeWidth="2" vectorEffect="non-scaling-stroke" /></svg><span className="presentation-skip-label">{screen.mode === "handoff" ? "Voltar à aplicação" : "Pular apresentação"}</span></button></div></header>
       <p className="presentation-slogan" data-chrome-anchor="slogan" key={`${clone ? "handoff" : "dialog"}:slogan`}><span>From insight to action.</span></p>
       <div className="presentation-curves" aria-hidden="true"><svg viewBox="0 0 400 400" fill="none"><path d="M-30 340H90C240 340 120 80 300 80H430" /><path d="M-30 390H120C280 390 160 130 330 130H430" /><circle cx="300" cy="80" r="12" /></svg></div>
       <svg className="signature-connector" viewBox="0 0 400 400" fill="none" aria-hidden="true"><defs><pattern id="goflow-connector-ink" patternUnits="userSpaceOnUse" width="400" height="400"><rect data-connector-base width="400" height="400" fill="var(--scene-accent)" /><g data-connector-reveal visibility="hidden"><svg><rect width="100%" height="100%" /></svg></g></pattern></defs><path d="M-30 340H90C240 340 120 80 300 80H430" /><circle cx="300" cy="80" r="7" /></svg>
