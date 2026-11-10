@@ -75,22 +75,31 @@
 #goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"])[data-palette] .presentation-footer nav { background: var(--scene-background); border-radius: 8px; }
 #goflow-presentation .presentation-slogan { position: relative; width: fit-content; pointer-events: none; }
 #goflow-presentation .presentation-slogan > span { padding: 4px 8px; }
-/* One live control plane; paint-only chrome belongs to each scene's reveal mask. */
+/* Paint-only chrome belongs to each scene's reveal mask. Skip is the exception:
+   its single, natural-size label stays in the live plane, never inside a mask. */
 #goflow-presentation .scene-chrome { visibility: hidden; pointer-events: none; }
 #goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"])[data-palette] .scene-chrome { visibility: visible; }
-#goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"])[data-palette] [data-chrome-anchor] { opacity: 0; }
+#goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"])[data-palette] [data-chrome-anchor="slogan"],
+#goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"])[data-palette] [data-chrome-anchor="navigation"],
+#goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"])[data-palette] [data-chrome-anchor="header"] > .scene-caption,
+#goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"])[data-palette] [data-chrome-anchor="header"] .scene-dots { opacity: 0; }
 #goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"])[data-palette] [data-chrome-anchor] button { transform: none; }
 #goflow-presentation .scene-chrome-header {
   position: fixed; left: var(--chrome-header-x, 0px); top: var(--chrome-header-y, 0px);
   width: var(--chrome-header-width, 0px); height: var(--chrome-header-height, 0px); margin: 0;
 }
-#goflow-presentation .scene-chrome-skip {
-  font-family: var(--chrome-skip-font-family, inherit); font-size: var(--chrome-skip-font-size, 11px);
-  font-style: var(--chrome-skip-font-style, normal); font-weight: var(--chrome-skip-font-weight, 400);
-  line-height: var(--chrome-skip-line-height, 1.5); letter-spacing: var(--chrome-skip-letter-spacing, normal);
-  text-transform: var(--chrome-skip-text-transform, none);
+#goflow-presentation .scene-chrome-skip-space {
   box-sizing: border-box; width: var(--chrome-skip-width, auto); height: var(--chrome-skip-height, auto); flex-shrink: 0;
 }
+#goflow-presentation button.presentation-skip {
+  padding: 11px 20px; transform: none; animation: none;
+  transition: box-shadow var(--motion-quick);
+}
+#goflow-presentation:is([data-mode="scenes"], [data-mode="handoff"]) button.presentation-skip {
+  background: var(--skip-background, var(--scene-background));
+  color: var(--skip-ink, var(--scene-ink)); border-color: var(--skip-ink, var(--scene-ink));
+}
+#goflow-presentation button.presentation-skip:focus-visible { outline-color: var(--skip-ink, var(--scene-ink)); }
 #goflow-presentation .scene-chrome-slogan {
   position: fixed; left: var(--chrome-slogan-x, 0px); top: var(--chrome-slogan-y, 0px);
   width: var(--chrome-slogan-width, 0px); height: var(--chrome-slogan-height, 0px); margin: 0;
@@ -105,10 +114,8 @@
   min-height: 44px; padding: 10px 14px; border-radius: var(--radius-control); font-size: 13px;
 }
 #goflow-presentation .scene-chrome-arrow[data-disabled] { opacity: .45; }
-#goflow-presentation:has([data-chrome-anchor="header"] .presentation-skip:focus-visible) .scene-chrome-skip,
 #goflow-presentation:has([data-chrome-anchor="navigation"] button[aria-label="Voltar"]:focus-visible) .scene-chrome-back,
 #goflow-presentation:has([data-chrome-anchor="navigation"] .scene-next:focus-visible) .scene-chrome-next { outline: 3px solid var(--scene-ink); outline-offset: 5px; }
-#goflow-presentation:has([data-chrome-anchor="header"] .presentation-skip:enabled:active) .scene-chrome-skip,
 #goflow-presentation:has([data-chrome-anchor="navigation"] button[aria-label="Voltar"]:enabled:active) .scene-chrome-back,
 #goflow-presentation:has([data-chrome-anchor="navigation"] .scene-next:enabled:active) .scene-chrome-next { transform: translateY(1px) scale(.985); }
 #goflow-presentation .presentation-choices { margin-top: 28px; gap: 16px; }
@@ -120,10 +127,13 @@
 #goflow-presentation .handoff-wordmark .splash-dot { color: var(--brand-chartreuse); }
 #goflow-presentation :focus-visible { outline: 3px solid var(--scene-ink); outline-offset: 5px; }
 #goflow-presentation .presentation-scene h1:focus { outline: none; }
-/* Static display type may receive programmatic focus; it is never an editor.
-   Keep focus and text selection, without a blinking caret in caret-browsing mode. */
-#goflow-presentation .splash-wordmark,
-#goflow-presentation .presentation-scene h1 { caret-color: transparent; }
+/* Presentation copy is static, including focusable headings and chrome.
+   Scope selection/caret rules to this dialog; genuine editors opt back in. */
+#goflow-presentation, #goflow-presentation * { -webkit-user-select: none; user-select: none; cursor: default; caret-color: transparent; }
+#goflow-presentation :is(button, a[href]), #goflow-presentation :is(button, a[href]) * { cursor: pointer; }
+#goflow-presentation button:disabled, #goflow-presentation button:disabled * { cursor: default; }
+#goflow-presentation :is(input, textarea, [contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]),
+#goflow-presentation :is([contenteditable="true"], [contenteditable=""], [contenteditable="plaintext-only"]) * { -webkit-user-select: text; user-select: text; cursor: text; caret-color: auto; }
 #goflow-presentation .handoff-wait { color: var(--foreground); background: var(--background); }
 
 /* Four narrative reveals. Each mask carries both the ink and its opaque canvas. */
@@ -191,14 +201,13 @@ html[data-route-motion="return"] { --route-origin: scale(.995); }
   .shell-navigation .nav-active-indicator { transition-timing-function: linear(0, .14 10%, .42 25%, .72 45%, .9 65%, .98 85%, 1); }
 }
 @media (hover: hover) and (pointer: fine) {
-  #goflow-presentation:has([data-chrome-anchor="header"] .presentation-skip:hover) .scene-chrome-skip { text-decoration: underline; }
-  #goflow-presentation:has([data-chrome-anchor="header"] .presentation-skip:hover) .scene-chrome-skip,
   #goflow-presentation:has([data-chrome-anchor="navigation"] button[aria-label="Voltar"]:enabled:hover) .scene-chrome-back,
   #goflow-presentation:has([data-chrome-anchor="navigation"] .scene-next:enabled:hover) .scene-chrome-next { box-shadow: 0 0 0 2px var(--scene-ink); }
   #goflow-presentation .presentation-choice:hover { transform: translateY(-3px); box-shadow: 0 8px 0 color-mix(in srgb, var(--scene-ink) 12%, transparent); }
   #goflow-presentation .presentation-choice:first-child:hover { background: var(--scene-hover); color: var(--scene-buttonInk); }
   #goflow-presentation .presentation-choice:nth-child(2):hover { background: var(--scene-ink); color: var(--scene-background); }
   #goflow-presentation :is(.presentation-skip, .presentation-footer button):hover { box-shadow: 0 0 0 2px var(--scene-ink); }
+  #goflow-presentation button.presentation-skip:hover { box-shadow: 0 0 0 2px var(--skip-ink, var(--scene-ink)); }
   .shell-navigation .nav-item:not([data-selected]):hover { background: var(--sidebar-hover); transform: none; }
   .workspace-shell :is(a.panel, a.metric-card, a.agent-card):hover { transform: translateY(-2px); border-color: var(--accent); }
 }

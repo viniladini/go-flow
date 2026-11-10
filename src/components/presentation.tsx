@@ -39,6 +39,7 @@ export function Presentation({ children }: { children: ReactNode }) {
   const dialog = useRef<HTMLDialogElement>(null), heading = useRef<HTMLHeadingElement>(null);
   const handoff = useRef<HTMLDivElement>(null);
   const noticeFooter = useRef<HTMLElement>(null), noticeAnchor = useRef<HTMLSpanElement>(null);
+  const skipButton = useRef<HTMLButtonElement>(null);
   const restoreFocus = useRef<HTMLElement | null>(null), finishing = useRef(false);
   const returning = useRef(false), moving = useRef(false);
   const ready = screen.mode === "handoff" && (screen.covered || reduce) && (!screen.target || pathname === screen.target);
@@ -81,12 +82,8 @@ export function Presentation({ children }: { children: ReactNode }) {
       }
       const skip = root.querySelector<HTMLButtonElement>('[data-chrome-anchor="header"] button.presentation-skip');
       if (skip) {
-        const style = getComputedStyle(skip), box = skip.getBoundingClientRect();
-        // Share typography/geometry only. Each masked scene keeps its own ink.
-        for (const property of ["font-family", "font-size", "font-style", "font-weight", "line-height", "letter-spacing", "text-transform"] as const) {
-          const value = style.getPropertyValue(property);
-          if (value) root.style.setProperty(`--chrome-skip-${property}`, value);
-        }
+        const box = skip.getBoundingClientRect();
+        // Empty slots reserve the dots' position; no masked copy of the label.
         if (box.width && box.height) {
           root.style.setProperty("--chrome-skip-width", `${box.width}px`);
           root.style.setProperty("--chrome-skip-height", `${box.height}px`);
@@ -119,6 +116,35 @@ export function Presentation({ children }: { children: ReactNode }) {
       slogan?.removeEventListener("transitioncancel", sloganTransition);
     };
   }, [screen.mode, screen.frame, screen.scene]);
+
+  useLayoutEffect(() => {
+    const button = skipButton.current, root = dialog.current;
+    if (!button || !root || !sceneNoticeVisible) return;
+    const paint = () => {
+      const colors = presentationColors(screen.scene);
+      button.style.setProperty("--skip-background", colors["--scene-background"]);
+      button.style.setProperty("--skip-ink", colors["--scene-ink"]);
+      button.dataset.palette = PRESENTATION_PALETTE[screen.scene];
+    };
+    if (reduce || screen.previous === null) { paint(); return; }
+    const incoming = root.querySelector<HTMLElement>(".cinematic-stage > .presentation-scene:not(.outgoing)");
+    let frame: number;
+    const followMask = () => {
+      const box = button.getBoundingClientRect();
+      // Native hit testing respects the actual animated clip-path (including
+      // rounded/elliptical masks). Switch the opaque button as one unit only
+      // when its entire box belongs to the incoming canvas. No text clones,
+      // color tween, estimated animation progress or independent timer.
+      const covered = incoming && box.width > 1 && box.height > 1 &&
+        [box.left + .5, box.right - .5].every((x) =>
+          [box.top + .5, box.bottom - .5].every((y) =>
+            document.elementsFromPoint?.(x, y).includes(incoming)));
+      if (covered) { paint(); return; }
+      frame = window.requestAnimationFrame(followMask);
+    };
+    followMask();
+    return () => window.cancelAnimationFrame(frame);
+  }, [screen.scene, screen.previous, sceneNoticeVisible, reduce]);
 
   useEffect(() => {
     if (screen.mode !== "handoff" || screen.covered) return;
@@ -282,7 +308,7 @@ export function Presentation({ children }: { children: ReactNode }) {
           <span className="scene-caption">{sceneCaptions[index]}</span>
           <div className="presentation-header-right">
             <ol className="scene-dots">{PRESENTATION_SCENES.map((item, step) => <li key={item.title} aria-current={step === index ? "step" : undefined} />)}</ol>
-            <span className="presentation-skip scene-chrome-skip">{screen.mode === "handoff" ? "Voltar à aplicação" : "Pular apresentação"}</span>
+            <span className="scene-chrome-skip-space" />
           </div>
         </div>
         <p className="presentation-slogan scene-chrome scene-chrome-slogan" aria-hidden="true" inert><span>From insight to action.</span></p>
@@ -300,7 +326,7 @@ export function Presentation({ children }: { children: ReactNode }) {
   const chromePaletteIndex = screen.previous ?? screen.scene;
   const renderWordmark = (compact = false) => <div className="splash-wordmark" data-frame={compact ? 1 : screen.frame} aria-hidden="true"><span>go<span className="splash-dot">.</span></span><span className="splash-flow">flow</span></div>;
   const renderContents = (clone = false) => screen.mode === "closed" ? null : shortOpening ? <div className="presentation-splash presentation-returning" aria-label="go.flow">{renderWordmark(true)}</div> : <>
-      <header className="presentation-header" data-chrome-anchor="header">{(screen.mode === "splash" && !revealing) || screen.splashExit ? <span className="splash-signature">gogroup</span> : <span className="scene-caption">{sceneCaptions[screen.scene]}</span>}<div className="presentation-header-right">{(screen.mode !== "splash" || revealing) && <ol className="scene-dots" aria-label="Progresso da apresentação">{PRESENTATION_SCENES.map((item, index) => <li key={item.title} aria-current={index === screen.scene ? "step" : undefined}><span className="sr-only">{index + 1}: {item.title}</span></li>)}</ol>}<button className="presentation-skip" onClick={skip}>{screen.mode === "handoff" ? "Voltar à aplicação" : "Pular apresentação"}</button></div></header>
+      <header className="presentation-header" data-chrome-anchor="header">{(screen.mode === "splash" && !revealing) || screen.splashExit ? <span className="splash-signature">gogroup</span> : <span className="scene-caption">{sceneCaptions[screen.scene]}</span>}<div className="presentation-header-right">{(screen.mode !== "splash" || revealing) && <ol className="scene-dots" aria-label="Progresso da apresentação">{PRESENTATION_SCENES.map((item, index) => <li key={item.title} aria-current={index === screen.scene ? "step" : undefined}><span className="sr-only">{index + 1}: {item.title}</span></li>)}</ol>}<button ref={skipButton} className="presentation-skip" onClick={skip}>{screen.mode === "handoff" ? "Voltar à aplicação" : "Pular apresentação"}</button></div></header>
       <p className="presentation-slogan" data-chrome-anchor="slogan" key={`${clone ? "handoff" : "dialog"}:slogan`}><span>From insight to action.</span></p>
       <div className="presentation-curves" aria-hidden="true"><svg viewBox="0 0 400 400" fill="none"><path d="M-30 340H90C240 340 120 80 300 80H430" /><path d="M-30 390H120C280 390 160 130 330 130H430" /><circle cx="300" cy="80" r="12" /></svg></div>
       <svg className="signature-connector" viewBox="0 0 400 400" fill="none" aria-hidden="true"><path d="M-30 340H90C240 340 120 80 300 80H430" /><circle cx="300" cy="80" r="7" /></svg>

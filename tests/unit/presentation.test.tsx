@@ -50,55 +50,77 @@ beforeEach(() => {
   navigation.pathname = "/"; navigation.push.mockReset(); mounts = 0; reduce = false;
   vi.stubGlobal("fetch", vi.fn(() => { throw new Error("Presentation must not use the network"); }));
   vi.stubGlobal("Worker", class { postMessage() {} terminate() {} });
+  // happy-dom has no layout/clip-path hit testing; coverage is supplied by each test.
+  Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: vi.fn(() => []) });
   vi.spyOn(window, "matchMedia").mockImplementation(() => ({ matches: reduce, addEventListener: vi.fn(), removeEventListener: vi.fn() }) as unknown as MediaQueryList);
   vi.spyOn(HTMLDialogElement.prototype, "showModal").mockImplementation(function(this: HTMLDialogElement) { this.setAttribute("open", ""); });
   vi.spyOn(HTMLDialogElement.prototype, "close").mockImplementation(function(this: HTMLDialogElement) { this.removeAttribute("open"); });
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
   navigation.push.mockImplementation((path: string) => { navigation.pathname = path; root.render(<View />); });
 });
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); Reflect.deleteProperty(document, "elementsFromPoint"); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("experiência de apresentação", () => {
-  it("títulos focáveis não exibem caret e campos editáveis mantêm seu cursor", async () => {
+  it("textos estaticos de toda a apresentacao nao selecionam nem exibem caret/I-beam", async () => {
     const stylesheet = document.createElement("style");
     stylesheet.textContent = readFileSync(resolve("src/app/signature-motion.css"), "utf8");
     document.head.append(stylesheet);
+    const outside = document.createElement("p"); document.body.append(outside);
     try {
       await mount();
-      const input = document.createElement("input"); input.style.caretColor = "rgb(20, 30, 40)"; dialog().append(input);
-      expect(getComputedStyle(dialog().querySelector(".splash-wordmark")!).caretColor).toBe("transparent");
-      await click("Conheça");
+      const input = document.createElement("input"); input.style.caretColor = "rgb(20, 30, 40)";
+      const textarea = document.createElement("textarea");
+      const editor = document.createElement("div"); editor.setAttribute("contenteditable", "true"); editor.innerHTML = "<span>Editor</span>";
+      dialog().append(input, textarea, editor);
+      const check = () => {
+        for (const text of dialog().querySelectorAll("h1, .presentation-description, .presentation-welcome, .splash-description, .splash-wordmark, .scene-caption, .presentation-slogan, .scene-dots li")) {
+          const style = getComputedStyle(text);
+          expect(style.caretColor).toBe("transparent"); expect(style.userSelect).toBe("none"); expect(style.cursor).toBe("default");
+        }
+        expect(getComputedStyle(dialog().querySelector(".presentation-skip")!).cursor).toBe("pointer");
+        expect(getComputedStyle(input).caretColor).toBe("rgb(20, 30, 40)");
+        for (const field of [input, textarea, editor, editor.firstElementChild!]) {
+          expect(getComputedStyle(field).userSelect).toBe("text"); expect(getComputedStyle(field).cursor).toBe("text");
+        }
+        expect(getComputedStyle(textarea).caretColor).toBe("auto");
+        expect(getComputedStyle(outside).userSelect).not.toBe("none");
+      };
+      check(); await click("Conheça");
       for (const index of [0, 1, 2, 3, 4, 3, 2, 1, 0]) {
         const current = Number(dialog().dataset.scene);
         if (current !== index) await click(index > current ? current === 0 ? "Começar" : "Avançar" : "Voltar");
         const heading = dialog().querySelector<HTMLElement>("#presentation-title")!;
-        expect(document.activeElement).toBe(heading); expect(heading.tabIndex).toBe(-1);
-        expect(getComputedStyle(heading).caretColor).toBe("transparent");
-        expect(getComputedStyle(input).caretColor).toBe("rgb(20, 30, 40)");
+        expect(document.activeElement).toBe(heading); expect(heading.tabIndex).toBe(-1); check();
       }
-    } finally { stylesheet.remove(); }
+    } finally { stylesheet.remove(); outside.remove(); }
   });
-  it("cópias do skip compartilham tipografia e caixa do único botão funcional", async () => {
+  it("skip tem um unico texto natural fora das mascaras, padding e slots vazios consistentes", async () => {
     const stylesheet = document.createElement("style");
     const globals = readFileSync(resolve("src/app/globals.css"), "utf8");
     stylesheet.textContent = globals.slice(globals.indexOf(":root"), globals.indexOf("/* Theme semantics")) + readFileSync(resolve("src/app/signature-motion.css"), "utf8");
     document.head.append(stylesheet);
     try {
       await mount();
-      const skip = dialog().querySelector<HTMLButtonElement>('[data-chrome-anchor="header"] button.presentation-skip')!;
-      Object.assign(skip.style, { fontFamily: '"Fixture Inter"', fontSize: "11px", fontWeight: "400", lineHeight: "16.5px", letterSpacing: "0px", textTransform: "none" });
-      const box = vi.spyOn(skip, "getBoundingClientRect").mockReturnValue(new DOMRect(100.25, 20.5, 138.25, 44));
+      const skip = dialog().querySelector<HTMLButtonElement>("button.presentation-skip")!;
+      Object.assign(skip.style, { fontFamily: '"Fixture Inter"', fontSize: "11px", fontWeight: "400", lineHeight: "16.5px" });
+      const box = vi.spyOn(skip, "getBoundingClientRect").mockReturnValue(new DOMRect(800, 20, 160, 44));
       await click("Conheça");
       const check = () => {
-        expect(dialog().querySelectorAll("button.presentation-skip")).toHaveLength(1);
-        expect(dialog().querySelector('[data-chrome-anchor="header"] button.presentation-skip')).toBe(skip);
-        for (const copy of dialog().querySelectorAll<HTMLElement>(".scene-chrome-skip")) {
-          const actual = getComputedStyle(skip), painted = getComputedStyle(copy);
-          for (const property of ["font-family", "font-size", "font-weight", "line-height", "letter-spacing", "text-transform"]) expect(painted.getPropertyValue(property), property).toBe(actual.getPropertyValue(property));
-          expect(copy.closest("[aria-hidden=true][inert]")).not.toBeNull();
-          expect(copy.tagName).toBe("SPAN"); expect(copy.tabIndex).toBe(-1);
-          expect(painted.width).toBe(dialog().style.getPropertyValue("--chrome-skip-width"));
-          expect(painted.height).toBe("44px");
+        expect(dialog().querySelectorAll(".presentation-skip")).toHaveLength(1);
+        expect(dialog().querySelector("button.presentation-skip")).toBe(skip);
+        expect(skip.closest(".cinematic-stage")).toBeNull();
+        expect(getComputedStyle(skip.parentElement!.parentElement!).opacity).not.toBe("0");
+        const style = getComputedStyle(skip);
+        expect(style.transform).toBe("none"); expect(style.animation).toBe("none");
+        expect(style.paddingLeft).toBe("20px"); expect(style.paddingRight).toBe("20px");
+        expect(style.paddingTop).toBe("11px"); expect(style.paddingBottom).toBe("11px");
+        expect(style.fontSize).toBe(skip.style.fontSize); expect(style.fontWeight).toBe("400");
+        for (const canvas of dialog().querySelectorAll(".presentation-scene")) {
+          expect(canvas.textContent).not.toContain("Pular apresentação");
+          const slot = canvas.querySelector<HTMLElement>(".scene-chrome-skip-space")!;
+          expect(slot.textContent).toBe(""); expect(slot.tabIndex).toBe(-1);
+          expect(slot.closest("[aria-hidden=true][inert]")).not.toBeNull();
+          expect(getComputedStyle(slot).width).toBe(dialog().style.getPropertyValue("--chrome-skip-width"));
         }
       };
       check();
@@ -106,47 +128,76 @@ describe("experiência de apresentação", () => {
         await act(async () => dialog().querySelector<HTMLButtonElement>(".scene-next")!.click()); check();
         await tick(SCENE_TRANSITION_MS); check();
       }
-      skip.style.fontSize = "10px"; skip.style.lineHeight = "15px";
-      box.mockReturnValue(new DOMRect(20, 16, 120.5, 44));
+      skip.style.fontSize = "10px";
+      box.mockReturnValue(new DOMRect(170, 16, 140, 44));
       await act(async () => window.dispatchEvent(new Event("resize"))); check();
-      expect(dialog().style.getPropertyValue("--chrome-skip-width")).toBe("120.5px");
+      expect(dialog().style.getPropertyValue("--chrome-skip-width")).toBe("140px");
       await act(async () => skip.click()); await tick(120);
       expect(dialog().open).toBe(false);
     } finally { stylesheet.remove(); }
   });
-  it("skip acompanha a tinta e o fundo da sua máscara na ida e volta entre cenas", async () => {
+  it("skip troca o par opaco apenas quando a mascara real cobre a caixa inteira, em todas as cenas", async () => {
     const stylesheet = document.createElement("style");
-    const globals = readFileSync(resolve("src/app/globals.css"), "utf8");
-    stylesheet.textContent = globals.slice(globals.indexOf(":root"), globals.indexOf("/* Theme semantics")) + readFileSync(resolve("src/app/signature-motion.css"), "utf8");
+    stylesheet.textContent = readFileSync(resolve("src/app/globals.css"), "utf8").match(/:root\s*\{[^}]+\}/)![0] + readFileSync(resolve("src/app/signature-motion.css"), "utf8");
     document.head.append(stylesheet);
     try {
-      await mount(); await click("Conheça");
-      const skip = dialog().querySelector<HTMLButtonElement>("button.presentation-skip")!;
-      const check = (scene: string, background: string, ink: string) => {
-        const canvas = dialog().querySelector<HTMLElement>(`.presentation-scene[data-scene="${scene}"]`)!;
-        const copy = canvas.querySelector<HTMLElement>(".scene-chrome-skip")!;
-        const style = getComputedStyle(copy);
-        expect(style.backgroundColor.toUpperCase()).toBe(background);
-        expect(style.color.toUpperCase()).toBe(ink); expect(style.borderColor.toUpperCase()).toBe(ink);
-        expect(copy.closest(".scene-content")).toBeNull();
-        expect(dialog().querySelector("button.presentation-skip")).toBe(skip);
-      };
-      check("0", "#DCEB16", "#101629");
-      await act(async () => dialog().querySelector<HTMLButtonElement>(".scene-next")!.click());
-      check("0", "#DCEB16", "#101629"); check("1", "#101629", "#FFFFFF");
-      expect(dialog().dataset.palette).toBe("lime");
-      // happy-dom does not expand the var()-based animation shorthand.
-      expect(stylesheet.textContent).toMatch(/animation:\s*signature-return[^;]*\bbackwards;/);
-      await tick(SCENE_TRANSITION_MS - 1);
-      check("0", "#DCEB16", "#101629"); check("1", "#101629", "#FFFFFF");
-      await act(async () => dialog().querySelector<HTMLButtonElement>('button[aria-label="Voltar"]')!.click());
-      check("1", "#101629", "#FFFFFF"); check("0", "#DCEB16", "#101629");
-      await tick(SCENE_TRANSITION_MS);
-      expect(dialog().querySelectorAll(".scene-chrome-skip")).toHaveLength(1);
-      check("0", "#DCEB16", "#101629");
-      await act(async () => skip.click()); await tick(120);
-      expect(dialog().open).toBe(false);
+    await mount(); await click("Conheça");
+    const skip = dialog().querySelector<HTMLButtonElement>("button.presentation-skip")!;
+    vi.spyOn(skip, "getBoundingClientRect").mockReturnValue(new DOMRect(800, 20, 160, 44));
+    let coverage = "none";
+    const hit = vi.spyOn(document, "elementsFromPoint").mockImplementation((_x, y) => {
+      const canvas = dialog().querySelector(".presentation-scene:not(.outgoing)")!;
+      return coverage === "full" || coverage === "partial" && y < 50 ? [skip, canvas] : [skip];
+    });
+    const pairs = [["#DCEB16", "#101629"], ["#101629", "#FFFFFF"], ["#1761B1", "#FFFFFF"], ["#F7F7F3", "#101629"], ["#101629", "#FFFFFF"]];
+    const check = (index: number) => {
+      const style = getComputedStyle(skip);
+      expect(style.backgroundColor.toUpperCase()).toBe(pairs[index][0]);
+      expect(style.color.toUpperCase()).toBe(pairs[index][1]);
+      expect(style.borderColor.toUpperCase()).toBe(pairs[index][1]);
+    };
+    expect(skip.dataset.palette).toBe("lime");
+    let painted = 0; check(painted);
+    for (const index of [1, 2, 3, 4, 3, 2, 1, 0]) {
+      const previous = skip.dataset.palette;
+      coverage = "none";
+      await act(async () => dialog().querySelector<HTMLButtonElement>(index > Number(dialog().dataset.scene) ? ".scene-next" : 'button[aria-label="Voltar"]')!.click());
+      expect(skip.dataset.palette).toBe(previous);
+      coverage = "partial"; await tick(32); expect(skip.dataset.palette).toBe(previous); check(painted);
+      coverage = "full"; await tick(32); expect(skip.dataset.palette).toBe(PRESENTATION_PALETTE[index]); check(index); painted = index;
+      const count = hit.mock.calls.length;
+      await tick(SCENE_TRANSITION_MS); expect(hit).toHaveBeenCalledTimes(count);
+      expect(skip.style.getPropertyValue("--skip-ink")).toBe(index === 0 || index === 3 ? "var(--brand-deep)" : "var(--on-brand)");
+    }
+    await tick(5000); expect(skip.dataset.palette).toBe("lime");
+    expect(dialog().dataset.scene).toBe("0");
     } finally { stylesheet.remove(); }
+  });
+  it("avanco interrompido cancela a sincronizacao obsoleta e pular continua imediato", async () => {
+    await mount(); await click("Conheça");
+    const skip = dialog().querySelector<HTMLButtonElement>("button.presentation-skip")!;
+    vi.spyOn(skip, "getBoundingClientRect").mockReturnValue(new DOMRect(170, 16, 140, 44));
+    const hit = vi.spyOn(document, "elementsFromPoint").mockReturnValue([]);
+    await act(async () => dialog().querySelector<HTMLButtonElement>(".scene-next")!.click()); await tick(32);
+    await act(async () => dialog().querySelector<HTMLButtonElement>(".scene-next")!.click());
+    expect(skip.dataset.palette).toBe("lime");
+    const incoming = dialog().querySelector('.presentation-scene[data-scene="2"]')!;
+    hit.mockReturnValue([skip, incoming]); await tick(32);
+    expect(skip.dataset.palette).toBe("blue");
+    await act(async () => skip.click());
+    expect(dialog().dataset.mode).toBe("handoff");
+    const count = hit.mock.calls.length; await tick(120);
+    expect(dialog().open).toBe(false); expect(hit).toHaveBeenCalledTimes(count);
+  });
+  it("reduced motion troca a paleta sem esperar mascara ou agendar sincronizacao", async () => {
+    reduce = true; await mount(); await click("Conheça");
+    const hit = vi.spyOn(document, "elementsFromPoint");
+    for (let index = 1; index < 5; index++) {
+      await act(async () => dialog().querySelector<HTMLButtonElement>(".scene-next")!.click());
+      expect(dialog().querySelector<HTMLButtonElement>(".presentation-skip")!.dataset.palette).toBe(PRESENTATION_PALETTE[index]);
+      expect(dialog().querySelector(".outgoing")).toBeNull();
+    }
+    expect(hit).not.toHaveBeenCalled();
   });
   it("aviso pertence a cada canvas e conserva suas cores em todas as transicoes", async () => {
     const stylesheet = document.createElement("style");
