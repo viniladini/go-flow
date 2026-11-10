@@ -22,6 +22,15 @@ materiais e próximos passos qualitativos vinculados às evidências. A Groq con
 selecionando IDs verificados; não escreve números nem recomenda quantidades.
 Prioridades obrigatórias não podem ser removidas pela seleção do modelo.
 
+Justificativas com o mesmo quadro de evidências exibido são agrupadas somente
+quando os materiais são consecutivos na ordem já calculada. Valores brutos
+diferentes não são unidos por arredondamento. Os SKUs e suas evidências individuais
+permanecem consultáveis. Perguntas explicativas recebem uma resposta curta;
+indicadores, critérios e orientações ficam no expansível existente. Em lead time,
+a resposta distingue explicitamente ordem por prazo de classificação de risco:
+um prazo elevado não implica, por si só, risco de ruptura. As orientações usam os
+sinais já calculados (saldo, cobertura, pendências e risco), sem autorizar ações.
+
 A ordenação é explícita: risco e déficit válido dentro da classe; cobertura por
 maior déficit e menor cobertura; prazo por maior média com amostra suficiente;
 oportunidades por maior capital elegível ao custo, sem somar categorias sobrepostas.

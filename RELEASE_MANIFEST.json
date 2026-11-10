@@ -56,7 +56,7 @@
     },
     {
       "path": "docs/go-agent.md",
-      "sha256": "0cc9663199edb77600cc9bdf69733e50178334f2770abcbbed653bcad1f96007"
+      "sha256": "30af07e987b2708b15bacbd370166889fd66ef71848c272953550f0e847af425"
     },
     {
       "path": "docs/operational-integration.md",
@@ -164,11 +164,11 @@
     },
     {
       "path": "src/app/signature-motion.css",
-      "sha256": "56027f23f1f22255356e7e42732cf22de88678470f68c163c371168efaa7af10"
+      "sha256": "bc77dd28b79fb283da30cdd69e4518f9364f4a3c0b5fd4b08c39f42ca775d16e"
     },
     {
       "path": "src/components/agent-analysis.tsx",
-      "sha256": "ca9c5c27793393c6f067edac1bb593e4aae1f2580d4297516ab37fc354460ccd"
+      "sha256": "2c2de6714bda494a6e86f00465299ef14802ea8888021bf0c451817dfe024a0e"
     },
     {
       "path": "src/components/agent-workspace.tsx",
@@ -220,7 +220,7 @@
     },
     {
       "path": "src/components/presentation.tsx",
-      "sha256": "d43e17df89d3c21cb38d43f9b33df0face15551be666ae90ed98b37073db1869"
+      "sha256": "82893d3c7e7348b9b76ac3607f817d71887a99b6e1e768582097f742ce080dc8"
     },
     {
       "path": "src/components/product-flow.tsx",
@@ -244,7 +244,7 @@
     },
     {
       "path": "src/lib/agent/analysis-brief.ts",
-      "sha256": "a8cc36fd8b36a6ea4b3feff4c3dc1273bcf76d357ee5cf0496e647f9f78773a2"
+      "sha256": "8cda09e70c34f02aa09525272a77f61ff4c2201abf20db0a86304a1c278002c2"
     },
     {
       "path": "src/lib/agent/analysis-topics.ts",
@@ -496,7 +496,7 @@
     },
     {
       "path": "tests/unit/agent-analysis-quality.test.ts",
-      "sha256": "1b152492627788bc7c515cbac2f32c87b5adc6041c1e3524035a5810808c2390"
+      "sha256": "3fe1b2a74908127ba413f3209dbad2565a0d04b75cfc92d6b512a78d0823ebc8"
     },
     {
       "path": "tests/unit/agent-intent.test.ts",
@@ -504,7 +504,7 @@
     },
     {
       "path": "tests/unit/agent-pages.test.tsx",
-      "sha256": "d718265a17bbcd7aeba9f72ac7745993f630b0e857de1e1dc6f71e29e4fc3058"
+      "sha256": "bb2ddb84b36550a7a806f9c9085bf9c77ed8907e8761461bf2fc7629c1cc79f6"
     },
     {
       "path": "tests/unit/agent-protection.test.ts",
@@ -592,7 +592,7 @@
     },
     {
       "path": "tests/unit/presentation.test.tsx",
-      "sha256": "cbdbc76f0c5bb31bb9f909c00f362e7ebc3cea631bbc3c51c9517fa1c94f8acb"
+      "sha256": "92c52084d5480ca69a570281cf0c424c496d7a2faef13c31586d6ccca7957653"
     },
     {
       "path": "tests/unit/public-release.test.ts",

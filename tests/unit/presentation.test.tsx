@@ -59,6 +59,95 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("experiência de apresentação", () => {
+  it("títulos focáveis não exibem caret e campos editáveis mantêm seu cursor", async () => {
+    const stylesheet = document.createElement("style");
+    stylesheet.textContent = readFileSync(resolve("src/app/signature-motion.css"), "utf8");
+    document.head.append(stylesheet);
+    try {
+      await mount();
+      const input = document.createElement("input"); input.style.caretColor = "rgb(20, 30, 40)"; dialog().append(input);
+      expect(getComputedStyle(dialog().querySelector(".splash-wordmark")!).caretColor).toBe("transparent");
+      await click("Conheça");
+      for (const index of [0, 1, 2, 3, 4, 3, 2, 1, 0]) {
+        const current = Number(dialog().dataset.scene);
+        if (current !== index) await click(index > current ? current === 0 ? "Começar" : "Avançar" : "Voltar");
+        const heading = dialog().querySelector<HTMLElement>("#presentation-title")!;
+        expect(document.activeElement).toBe(heading); expect(heading.tabIndex).toBe(-1);
+        expect(getComputedStyle(heading).caretColor).toBe("transparent");
+        expect(getComputedStyle(input).caretColor).toBe("rgb(20, 30, 40)");
+      }
+    } finally { stylesheet.remove(); }
+  });
+  it("cópias do skip compartilham tipografia e caixa do único botão funcional", async () => {
+    const stylesheet = document.createElement("style");
+    const globals = readFileSync(resolve("src/app/globals.css"), "utf8");
+    stylesheet.textContent = globals.slice(globals.indexOf(":root"), globals.indexOf("/* Theme semantics")) + readFileSync(resolve("src/app/signature-motion.css"), "utf8");
+    document.head.append(stylesheet);
+    try {
+      await mount();
+      const skip = dialog().querySelector<HTMLButtonElement>('[data-chrome-anchor="header"] button.presentation-skip')!;
+      Object.assign(skip.style, { fontFamily: '"Fixture Inter"', fontSize: "11px", fontWeight: "400", lineHeight: "16.5px", letterSpacing: "0px", textTransform: "none" });
+      const box = vi.spyOn(skip, "getBoundingClientRect").mockReturnValue(new DOMRect(100.25, 20.5, 138.25, 44));
+      await click("Conheça");
+      const check = () => {
+        expect(dialog().querySelectorAll("button.presentation-skip")).toHaveLength(1);
+        expect(dialog().querySelector('[data-chrome-anchor="header"] button.presentation-skip')).toBe(skip);
+        for (const copy of dialog().querySelectorAll<HTMLElement>(".scene-chrome-skip")) {
+          const actual = getComputedStyle(skip), painted = getComputedStyle(copy);
+          for (const property of ["font-family", "font-size", "font-weight", "line-height", "letter-spacing", "text-transform"]) expect(painted.getPropertyValue(property), property).toBe(actual.getPropertyValue(property));
+          expect(copy.closest("[aria-hidden=true][inert]")).not.toBeNull();
+          expect(copy.tagName).toBe("SPAN"); expect(copy.tabIndex).toBe(-1);
+          expect(painted.width).toBe(dialog().style.getPropertyValue("--chrome-skip-width"));
+          expect(painted.height).toBe("44px");
+        }
+      };
+      check();
+      for (let index = 1; index < 5; index++) {
+        await act(async () => dialog().querySelector<HTMLButtonElement>(".scene-next")!.click()); check();
+        await tick(SCENE_TRANSITION_MS); check();
+      }
+      skip.style.fontSize = "10px"; skip.style.lineHeight = "15px";
+      box.mockReturnValue(new DOMRect(20, 16, 120.5, 44));
+      await act(async () => window.dispatchEvent(new Event("resize"))); check();
+      expect(dialog().style.getPropertyValue("--chrome-skip-width")).toBe("120.5px");
+      await act(async () => skip.click()); await tick(120);
+      expect(dialog().open).toBe(false);
+    } finally { stylesheet.remove(); }
+  });
+  it("skip acompanha a tinta e o fundo da sua máscara na ida e volta entre cenas", async () => {
+    const stylesheet = document.createElement("style");
+    const globals = readFileSync(resolve("src/app/globals.css"), "utf8");
+    stylesheet.textContent = globals.slice(globals.indexOf(":root"), globals.indexOf("/* Theme semantics")) + readFileSync(resolve("src/app/signature-motion.css"), "utf8");
+    document.head.append(stylesheet);
+    try {
+      await mount(); await click("Conheça");
+      const skip = dialog().querySelector<HTMLButtonElement>("button.presentation-skip")!;
+      const check = (scene: string, background: string, ink: string) => {
+        const canvas = dialog().querySelector<HTMLElement>(`.presentation-scene[data-scene="${scene}"]`)!;
+        const copy = canvas.querySelector<HTMLElement>(".scene-chrome-skip")!;
+        const style = getComputedStyle(copy);
+        expect(style.backgroundColor.toUpperCase()).toBe(background);
+        expect(style.color.toUpperCase()).toBe(ink); expect(style.borderColor.toUpperCase()).toBe(ink);
+        expect(copy.closest(".scene-content")).toBeNull();
+        expect(dialog().querySelector("button.presentation-skip")).toBe(skip);
+      };
+      check("0", "#DCEB16", "#101629");
+      await act(async () => dialog().querySelector<HTMLButtonElement>(".scene-next")!.click());
+      check("0", "#DCEB16", "#101629"); check("1", "#101629", "#FFFFFF");
+      expect(dialog().dataset.palette).toBe("lime");
+      // happy-dom does not expand the var()-based animation shorthand.
+      expect(stylesheet.textContent).toMatch(/animation:\s*signature-return[^;]*\bbackwards;/);
+      await tick(SCENE_TRANSITION_MS - 1);
+      check("0", "#DCEB16", "#101629"); check("1", "#101629", "#FFFFFF");
+      await act(async () => dialog().querySelector<HTMLButtonElement>('button[aria-label="Voltar"]')!.click());
+      check("1", "#101629", "#FFFFFF"); check("0", "#DCEB16", "#101629");
+      await tick(SCENE_TRANSITION_MS);
+      expect(dialog().querySelectorAll(".scene-chrome-skip")).toHaveLength(1);
+      check("0", "#DCEB16", "#101629");
+      await act(async () => skip.click()); await tick(120);
+      expect(dialog().open).toBe(false);
+    } finally { stylesheet.remove(); }
+  });
   it("aviso pertence a cada canvas e conserva suas cores em todas as transicoes", async () => {
     const stylesheet = document.createElement("style");
     const globals = readFileSync(resolve("src/app/globals.css"), "utf8");

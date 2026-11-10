@@ -52,6 +52,37 @@ function stepFor(row: SkuMetrics, topic: AnalysisTopic): keyof typeof nextSteps 
   if (row.leadTime.status !== "sufficient") return "lead";
   return ["critical", "attention"].includes(row.risk.level) ? "planning" : "monitor";
 }
+function recommendationText(row: SkuMetrics, step: keyof typeof nextSteps): string {
+  if (step === "pending" && row.risk.level === "critical") return "Nos itens críticos, confirme se os pedidos pendentes podem chegar antes de a cobertura estimada terminar. Até a confirmação, não conte essas quantidades como estoque recebido.";
+  if (step === "pending" && row.risk.level === "attention") return "Confira o prazo dos pedidos pendentes: a cobertura está dentro da margem de variabilidade do motor. Reavalie a exposição se a chegada não for confirmada.";
+  if (step === "pending" && row.risk.level === "low") return "Nos itens de risco baixo, confira o andamento dos pedidos pendentes antes de ampliar a reposição, para evitar sobreposição de compras.";
+  if (step === "reconcile" && row.stock.state === "negative") return "Concilie o saldo negativo com os registros de estoque antes de interpretar a necessidade de reposição.";
+  if (step === "reconcile" && (row.stock.stale || ["missing", "no_history"].includes(row.stock.state))) return "Atualize ou confirme a posição de estoque; o saldo disponível não sustenta uma comparação atual de cobertura.";
+  if (step === "reconcile") return "Complete as evidências de vendas e cobertura antes de concluir que é necessário repor. Dados insuficientes não representam demanda zero.";
+  if (step === "planning" && row.risk.level === "critical") return "Revise primeiro saldo e prazo de chegada dos itens críticos. Se a exposição persistir, solicite um planejamento separado para revisão humana.";
+  if (step === "planning" && row.risk.level === "attention") return "Confira a folga de cobertura frente à variação dos prazos antes de solicitar um planejamento para revisão.";
+  if (step === "excess" && row.movement.lowMovement === "identified") return "Revise o consumo e a destinação dos itens de baixa movimentação antes de ampliar a reposição. O capital identificado não é economia garantida.";
+  return nextSteps[step];
+}
+function explainSelection(items: AnalysisBrief["items"], focus: AnalysisTopic): string {
+  if (focus === "lead_time") return "A ordem considera o maior prazo médio com amostra suficiente, não o maior risco. Prazo elevado não significa necessariamente ruptura: a cobertura e as demais evidências podem sustentar classificações diferentes.";
+  if (focus === "coverage") return "A comparação começa pelo maior déficit válido; em empate, usa a menor cobertura e depois o SKU. Dados sem comparação válida não recebem déficit zero.";
+  if (focus === "opportunities") return "Esses materiais aparecem pelos sinais de excesso, baixo giro ou descontinuação. A ordem usa o maior capital elegível de cada item, sem somar categorias sobrepostas; não é uma estimativa de economia realizada.";
+  const first = items[0], differentRisk = items.find((item) => item.risk !== first?.risk);
+  if (first && differentRisk) return `${first.sku} aparece antes de ${differentRisk.sku} porque a classe de risco ${first.riskLabel.toLowerCase()} precede ${differentRisk.riskLabel.toLowerCase()} nos critérios exibidos. O prazo isolado não determina essa ordem.`;
+  const differentDeficit = items.find((item) => item.coverageDeficitDays !== first?.coverageDeficitDays);
+  if (first?.coverageDeficitDays !== null && first?.coverageDeficitDays !== undefined && differentDeficit?.coverageDeficitDays !== null && differentDeficit?.coverageDeficitDays !== undefined) {
+    if (formatDays(first.coverageDeficitDays) === formatDays(differentDeficit.coverageDeficitDays)) return "Na mesma classe de risco, a ordem usa os déficits do motor antes da formatação. Os rótulos arredondados aparecem iguais, mas os valores usados na comparação diferem; isso não representa empate.";
+    return `Na mesma classe de risco, ${first.sku} aparece antes de ${differentDeficit.sku} pelo maior déficit estimado: ${formatDays(first.coverageDeficitDays)} frente a ${formatDays(differentDeficit.coverageDeficitDays)}. Isso não comprova falta física.`;
+  }
+  if (differentDeficit) return "Dentro da mesma classe, as comparações válidas de cobertura aparecem primeiro. Materiais sem essa evidência não recebem déficit zero nem uma conclusão automática sobre urgência.";
+  if (first && items.length === 1) return `${first.sku} aparece pela classificação de risco ${first.riskLabel.toLowerCase()}. ${first.reason}`;
+  if (items.length > 1 && items.every((item) => item.coverageDays !== null && item.leadTimeDays !== null && item.coverageDays === first.coverageDays && item.leadTimeDays === first.leadTimeDays && item.coverageDeficitDays === first.coverageDeficitDays)) {
+    return "Esses materiais têm a mesma classe de risco e os mesmos valores de cobertura, prazo médio e déficit estimado. Por esses indicadores, a prioridade é equivalente; o SKU apenas desempata a exibição.";
+  }
+  if (items.length > 1 && first?.coverageDeficitDays !== null) return "Esses materiais empatam na classe de risco e no déficit usado na ordenação; o SKU desempata a exibição. Isso não significa que os demais indicadores sejam iguais.";
+  return "A seleção segue a classificação do motor e a comparação válida entre cobertura e prazo. Quando faltam evidências, não é possível concluir a urgência apenas pelo saldo ou pelo lead time.";
+}
 export function buildAnalysisBrief(dataset: Dataset, analytics: AnalyticsResult, prompt: string, previous?: AnalysisFollowUpContext) {
   const topic = analysisTopic(prompt, previous?.topic);
   // "Why?" keeps the subject being discussed instead of defaulting to stock risk.
@@ -91,22 +122,20 @@ export function buildAnalysisBrief(dataset: Dataset, analytics: AnalyticsResult,
     priorities: `Entre ${formatNumber(scoped.length)} SKUs consultados, ${formatNumber(scopedRisk("critical"))} estão em risco crítico. Eu começaria pela exposição mais urgente abaixo, separando faltas de evidência de necessidade de reposição. Prioridade não é ordem de compra.`,
     causes: `A classificação inclui ${formatNumber(scopedRisk("insufficient"))} SKUs com dados insuficientes neste escopo. Nos demais, a comparação entre cobertura e prazo ajuda a explicar a exposição; ela não demonstra causalidade nem responsabilidade do fornecedor.`,
     coverage: deficitCount ? `${formatNumber(deficitCount)} de ${formatNumber(validCoverage.length)} SKUs avaliáveis têm cobertura abaixo do lead time médio. O déficit mostra essa diferença em dias, não uma quantidade a comprar ou uma ruptura confirmada.` : "Não há déficit positivo entre cobertura e lead time nas comparações válidas deste escopo. Isso não elimina incertezas nem resolve os itens sem dados suficientes.",
-    lead_time: `O maior prazo médio observado neste escopo é ${formatDays(rows[0]?.leadTime.meanDays ?? null)}. Ele exige antecedência na revisão da reposição. Confira a qualidade da amostra e os pedidos pendentes; histórico não é promessa de entrega.`,
+    lead_time: `O maior prazo médio observado neste escopo é ${formatDays(rows[0]?.leadTime.meanDays ?? null)}. Esta lista compara prazos, não urgência de reposição: prazo elevado não significa necessariamente risco de ruptura. A cobertura e a classificação de cada material completam a leitura.`,
     opportunities: `Há ${formatNumber(ranked.length)} materiais no escopo para revisar por excesso potencial, baixa movimentação ou descontinuação. Investigue destinação e parâmetros de reposição; o capital identificado não representa economia realizada.`,
   };
-  if (topic === "causes" && focus === "opportunities") summaries.causes = `Os sinais neste escopo apontam ${formatNumber(ranked.length)} materiais com excesso potencial, baixa movimentação ou descontinuação. Eles justificam revisar a alocação de capital; não provam a causa do estoque acumulado nem garantem economia.`;
-  if (topic === "causes" && focus === "coverage") summaries.causes = `${formatNumber(deficitCount)} comparações válidas mostram cobertura abaixo do lead time médio neste escopo. Essa diferença explica a exposição estimada; não comprova ruptura nem uma causa real de atraso.`;
-  if (topic === "causes" && focus === "lead_time") summaries.causes = "O histórico de recebimentos mostra os prazos e a suficiência das amostras abaixo. Ele permite revisar a exposição, mas não explica por si só a causa de atrasos ou a responsabilidade de fornecedores.";
   const items: AnalysisBrief["items"] = rows.map((row) => ({ sku: row.sku, name: catalog.get(row.sku)!.descricao, risk: row.risk.level, riskLabel: RISK_LABELS[row.risk.level],
     reason: focus === "opportunities" ? row.status === "descontinuado" ? "Item descontinuado; revisar destinação, sem reposição rotineira." : `Capital elegível ao custo: ${formatMoney(opportunityCapital(row) < 0 ? null : opportunityCapital(row))}. Categorias potencialmente sobrepostas.` :
-      focus === "lead_time" ? `${formatNumber(row.leadTime.sampleSize)} recebimentos na amostra; ${formatNumber(row.leadTime.pendingOrders)} pedidos pendentes.` : row.risk.reason,
+      focus === "lead_time" ? `${row.coverage.status !== "available" || row.stock.stale || row.coverage.days === null || row.leadTime.status !== "sufficient" || row.leadTime.meanDays === null ? "Sem comparação válida entre cobertura e prazo." : row.coverage.days > row.leadTime.meanDays ? "A cobertura estimada supera o prazo médio." : row.coverage.days === row.leadTime.meanDays ? "Cobertura e prazo médio coincidem, sem folga nessa comparação." : "A cobertura estimada termina antes do prazo médio."} ${formatNumber(row.leadTime.sampleSize)} recebimentos na amostra; ${formatNumber(row.leadTime.pendingOrders)} pedidos pendentes.` : row.risk.reason,
     coverageDays: row.coverage.status === "available" && !row.stock.stale ? row.coverage.days : null,
     leadTimeDays: row.leadTime.status === "sufficient" ? row.leadTime.meanDays : null, coverageDeficitDays: coverageDeficitDays(row) }));
+  if (topic === "causes") summaries.causes = explainSelection(items, focus);
   const recommendations: AnalysisBrief["recommendations"] = [];
   for (const row of rows) {
-    const id = stepFor(row, focus), existing = recommendations.find((item) => item.id === id);
+    const step = stepFor(row, focus), text = recommendationText(row, step), existing = recommendations.find((item) => item.text === text);
     if (existing) { existing.skuCodes.push(row.sku); existing.evidenceIds.push(row.sku); }
-    else recommendations.push({ id, text: nextSteps[id], skuCodes: [row.sku], evidenceIds: [row.sku] });
+    else recommendations.push({ id: `${step}_${recommendations.length}`, text, skuCodes: [row.sku], evidenceIds: [row.sku] });
   }
   const refreshed = !!previous && (previous.snapshotId !== snapshotId || previous.referenceDate !== analytics.config.referenceDate || requested.some((sku) => !catalog.has(sku)));
   const brief: AnalysisBrief = { topic, title: titles[topic], summary: rows.length ? summaries[topic] : "Não há itens elegíveis neste escopo para a comparação solicitada. Consulte os indicadores e complete as evidências antes de decidir.",

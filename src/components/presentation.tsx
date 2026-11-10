@@ -79,6 +79,19 @@ export function Presentation({ children }: { children: ReactNode }) {
         if (!box?.width) continue;
         for (const [key, value] of Object.entries({ x: box.left, y: box.top, width: box.width, height: box.height })) root.style.setProperty(`--chrome-${name}-${key}`, `${value}px`);
       }
+      const skip = root.querySelector<HTMLButtonElement>('[data-chrome-anchor="header"] button.presentation-skip');
+      if (skip) {
+        const style = getComputedStyle(skip), box = skip.getBoundingClientRect();
+        // Share typography/geometry only. Each masked scene keeps its own ink.
+        for (const property of ["font-family", "font-size", "font-style", "font-weight", "line-height", "letter-spacing", "text-transform"] as const) {
+          const value = style.getPropertyValue(property);
+          if (value) root.style.setProperty(`--chrome-skip-${property}`, value);
+        }
+        if (box.width && box.height) {
+          root.style.setProperty("--chrome-skip-width", `${box.width}px`);
+          root.style.setProperty("--chrome-skip-height", `${box.height}px`);
+        }
+      }
       const navigation = root.querySelector<HTMLElement>('[data-chrome-anchor="navigation"]');
       const box = navigation?.getBoundingClientRect();
       if (navigation && box?.width && bar.width) {
@@ -92,6 +105,8 @@ export function Presentation({ children }: { children: ReactNode }) {
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     observer?.observe(footer); observer?.observe(anchor);
     root.querySelectorAll<HTMLElement>("[data-chrome-anchor]").forEach((element) => observer?.observe(element));
+    const skip = root.querySelector<HTMLButtonElement>('[data-chrome-anchor="header"] button.presentation-skip');
+    if (skip) observer?.observe(skip);
     window.addEventListener("resize", measure);
     slogan?.addEventListener("transitionrun", sloganTransition);
     slogan?.addEventListener("transitionend", sloganTransition);

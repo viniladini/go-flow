@@ -31,6 +31,68 @@ beforeEach(async () => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe("go.agent e Central de Ações", () => {
+  it("agrupa somente evidências exatamente equivalentes e mantém todos os SKUs rastreáveis", async () => {
+    const response = agentBriefAnalysis();
+    const first = response.analysis.brief!.items[0];
+    const skus = [first.sku, "DEMO-FLOW-0012"];
+    response.analysis.brief!.items = skus.map((sku) => ({ ...first, sku }));
+    response.analysis.context!.skuCodes = skus;
+    response.analysis.brief!.recommendations[0].skuCodes = skus;
+    response.analysis.brief!.recommendations[0].evidenceIds = skus;
+    response.analysis.evidence = skus.map((id) => ({ id, text: `Evidência técnica verificada de ${id}.` }));
+    vi.mocked(agentTransport.execute).mockResolvedValueOnce(response);
+    await act(async () => { current.agent.setDraft("Analisar risco de ruptura"); await current.agent.execute(); });
+    const panel = container.querySelector('[aria-label="Análise demonstrativa verificada"]')!;
+    expect(panel.querySelectorAll("ol > li")).toHaveLength(1);
+    for (const sku of skus) {
+      expect(panel.querySelector("ol")?.textContent).toContain(sku);
+      expect(panel.querySelector("details")?.textContent).toContain(`Evidência técnica verificada de ${sku}`);
+    }
+    expect(Array.from(panel.querySelectorAll("ol p")).filter((p) => p.textContent === first.reason)).toHaveLength(1);
+    response.analysis.brief!.items[1].leadTimeDays = 2.00001;
+    response.analysis.brief!.items[1].coverageDeficitDays = 1.75001;
+    vi.mocked(agentTransport.execute).mockResolvedValueOnce(response);
+    await act(async () => { current.agent.setDraft("Analisar risco de ruptura"); await current.agent.execute(); });
+    expect(container.querySelectorAll('[aria-label="Análise demonstrativa verificada"] ol > li')).toHaveLength(2);
+  });
+  it("não reúne equivalências separadas por outro material nem muda a ordem recebida", async () => {
+    const response = agentBriefAnalysis(), first = response.analysis.brief!.items[0];
+    const skus = [first.sku, "DEMO-FLOW-0012", "DEMO-FLOW-0013"];
+    response.analysis.brief!.items = skus.map((sku, i) => ({ ...first, sku, leadTimeDays: i === 1 ? 3 : first.leadTimeDays }));
+    response.analysis.context!.skuCodes = skus;
+    response.analysis.brief!.recommendations[0].skuCodes = skus;
+    response.analysis.brief!.recommendations[0].evidenceIds = skus;
+    response.analysis.evidence = skus.map((id) => ({ id, text: `Evidência de ${id}.` }));
+    vi.mocked(agentTransport.execute).mockResolvedValueOnce(response);
+    await act(async () => { current.agent.setDraft("Analise o estoque"); await current.agent.execute(); });
+    const names = Array.from(container.querySelectorAll('[aria-label="Análise demonstrativa verificada"] ol > li strong')).map((item) => item.textContent);
+    expect(names).toHaveLength(3);
+    expect(names.map((text) => text!.split(" · ")[0])).toEqual(skus);
+  });
+  it("explicação direta mantém indicadores, critérios e orientações no expansível fechado", async () => {
+    const response = agentBriefAnalysis(); response.analysis.brief!.topic = "causes";
+    response.analysis.brief!.summary = "Eles empatam nos indicadores verificados; o SKU apenas desempata a exibição.";
+    const metric = response.analysis.brief!.indicators[0];
+    const duplicated = `${metric.label}: ${metric.value}. ${metric.detail}`;
+    response.analysis.evidence.push({ id: `brief_${metric.id}`, text: duplicated });
+    vi.mocked(agentTransport.execute).mockResolvedValueOnce(response);
+    await act(async () => { current.agent.setDraft("Por que esses materiais foram priorizados?"); await current.agent.execute(); });
+    const panel = container.querySelector('[aria-label="Análise demonstrativa verificada"]')!;
+    const details = panel.querySelector("details")!;
+    expect(details.open).toBe(false);
+    expect(panel.querySelector(".agent-explanation")?.textContent).toBe(response.analysis.brief!.summary);
+    expect(panel.querySelector('[aria-label="Indicadores da análise"]')?.closest("details")).toBe(details);
+    expect(panel.querySelector("ul")?.closest("details")).toBe(details);
+    expect(details.textContent).toContain(response.analysis.brief!.criteria);
+    expect(details.textContent).toContain(response.analysis.evidence[0].text);
+    expect(Array.from(details.querySelectorAll("p")).some((p) => p.textContent === duplicated)).toBe(false);
+    expect(panel.querySelector("ol")).toBeNull(); expect(container.querySelector(".agent-review")).toBeNull();
+    const extra = duplicated + " Ressalva técnica adicional verificável.";
+    response.analysis.evidence[1].text = extra;
+    vi.mocked(agentTransport.execute).mockResolvedValueOnce(response);
+    await act(async () => { current.agent.setDraft("Por que esses materiais foram priorizados?"); await current.agent.execute(); });
+    expect(container.querySelector('[aria-label="Análise demonstrativa verificada"] details')?.textContent).toContain(extra);
+  });
   it("hierarquiza resumo, indicadores, itens e próximos passos sem repetir o relatório técnico", async () => {
     const response = agentBriefAnalysis(); response.analysis.brief!.refreshed = true;
     vi.mocked(agentTransport.execute).mockResolvedValueOnce(response);

@@ -8,7 +8,9 @@
   padding: max(130px, 17dvh) clamp(20px, 4vw, 56px) max(112px, 13dvh);
   display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain;
   background: var(--scene-background); color: var(--scene-ink); z-index: 2;
-  animation: signature-return var(--scene-duration) var(--ease-editorial) both;
+  /* Release the full-viewport clip after the reveal instead of retaining a
+     masked text surface indefinitely. The start mask and timing stay identical. */
+  animation: signature-return var(--scene-duration) var(--ease-editorial) backwards;
 }
 #goflow-presentation .scene-content { position: relative; width: 100%; max-width: 1120px; margin: auto; flex: 0 0 auto; }
 #goflow-presentation .cinematic-stage > .presentation-scene.outgoing { z-index: 1; pointer-events: none; animation: none; }
@@ -82,6 +84,13 @@
   position: fixed; left: var(--chrome-header-x, 0px); top: var(--chrome-header-y, 0px);
   width: var(--chrome-header-width, 0px); height: var(--chrome-header-height, 0px); margin: 0;
 }
+#goflow-presentation .scene-chrome-skip {
+  font-family: var(--chrome-skip-font-family, inherit); font-size: var(--chrome-skip-font-size, 11px);
+  font-style: var(--chrome-skip-font-style, normal); font-weight: var(--chrome-skip-font-weight, 400);
+  line-height: var(--chrome-skip-line-height, 1.5); letter-spacing: var(--chrome-skip-letter-spacing, normal);
+  text-transform: var(--chrome-skip-text-transform, none);
+  box-sizing: border-box; width: var(--chrome-skip-width, auto); height: var(--chrome-skip-height, auto); flex-shrink: 0;
+}
 #goflow-presentation .scene-chrome-slogan {
   position: fixed; left: var(--chrome-slogan-x, 0px); top: var(--chrome-slogan-y, 0px);
   width: var(--chrome-slogan-width, 0px); height: var(--chrome-slogan-height, 0px); margin: 0;
@@ -111,6 +120,10 @@
 #goflow-presentation .handoff-wordmark .splash-dot { color: var(--brand-chartreuse); }
 #goflow-presentation :focus-visible { outline: 3px solid var(--scene-ink); outline-offset: 5px; }
 #goflow-presentation .presentation-scene h1:focus { outline: none; }
+/* Static display type may receive programmatic focus; it is never an editor.
+   Keep focus and text selection, without a blinking caret in caret-browsing mode. */
+#goflow-presentation .splash-wordmark,
+#goflow-presentation .presentation-scene h1 { caret-color: transparent; }
 #goflow-presentation .handoff-wait { color: var(--foreground); background: var(--background); }
 
 /* Four narrative reveals. Each mask carries both the ink and its opaque canvas. */
@@ -178,6 +191,7 @@ html[data-route-motion="return"] { --route-origin: scale(.995); }
   .shell-navigation .nav-active-indicator { transition-timing-function: linear(0, .14 10%, .42 25%, .72 45%, .9 65%, .98 85%, 1); }
 }
 @media (hover: hover) and (pointer: fine) {
+  #goflow-presentation:has([data-chrome-anchor="header"] .presentation-skip:hover) .scene-chrome-skip { text-decoration: underline; }
   #goflow-presentation:has([data-chrome-anchor="header"] .presentation-skip:hover) .scene-chrome-skip,
   #goflow-presentation:has([data-chrome-anchor="navigation"] button[aria-label="Voltar"]:enabled:hover) .scene-chrome-back,
   #goflow-presentation:has([data-chrome-anchor="navigation"] .scene-next:enabled:hover) .scene-chrome-next { box-shadow: 0 0 0 2px var(--scene-ink); }

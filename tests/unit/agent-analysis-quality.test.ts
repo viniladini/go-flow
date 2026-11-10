@@ -4,7 +4,7 @@ import { buildAnalysisBrief, coverageDeficitDays, rankAnalyticSkus } from "@/lib
 import { demoAnalysisContext, verifiedAnalysis } from "@/lib/agent/analysis";
 import { parseAgentRequest, parseAnalysisContext } from "@/lib/agent/contracts";
 import { resolveAgentIntent } from "@/lib/agent/intent";
-import { buyingFixture } from "../fixtures/buying";
+import { buyingFixture, syntheticOrder } from "../fixtures/buying";
 import { operationalFixture } from "../fixtures/operational";
 import type { SkuMetrics } from "@/lib/analytics/types";
 
@@ -21,6 +21,66 @@ function row(sku = "DEMO-FLOW-0001", coverage = 1.25, lead = 4.5): SkuMetrics {
     risk: { level: "critical", reason: "Cobertura abaixo do prazo médio observado.", replenishmentDays: lead } };
 }
 describe("análise fundamentada e adaptativa", () => {
+  it("explica um empate de prioridades sem repetir o relatório ou alterar métricas", () => {
+    const dataset = buyingFixture([{ id: "DEMO-FLOW-0001", stock: 2 }, { id: "DEMO-FLOW-0002", stock: 2 }]);
+    const analytics = analyzeOperationalDataset(dataset, operationalAnalyticsConfig(dataset.referenceDate, 30));
+    const before = structuredClone(analytics);
+    const first = buildAnalysisBrief(dataset, analytics, "Quais materiais priorizar?");
+    const follow = buildAnalysisBrief(dataset, analytics, "Por que esses materiais foram priorizados?", first.context);
+    expect(follow.brief.summary).toContain("prioridade é equivalente");
+    expect(follow.brief.summary).toContain("SKU apenas desempata");
+    expect(follow.brief.summary.length).toBeLessThan(350);
+    expect(follow.brief.items).toEqual(first.brief.items);
+    expect(analytics).toEqual(before);
+  });
+  it("comparação explica somente diferenças verificadas de déficit ou classe de risco", () => {
+    const dataset = buyingFixture([{ id: "DEMO-FLOW-0001", stock: 1 }, { id: "DEMO-FLOW-0002", stock: 3 }]);
+    const analytics = analyzeOperationalDataset(dataset, operationalAnalyticsConfig(dataset.referenceDate, 30));
+    const first = buildAnalysisBrief(dataset, analytics, "Quais prioridades?");
+    const follow = buildAnalysisBrief(dataset, analytics, "Por que esses materiais foram priorizados?", first.context);
+    expect(follow.brief.summary).toContain("9 dias frente a 7 dias");
+    expect(follow.brief.items).toEqual(first.brief.items);
+    const mixedData = buyingFixture([{ id: "DEMO-FLOW-0001", stock: 50 }, { id: "DEMO-FLOW-0002", stock: 2 }]);
+    const mixedMetrics = analyzeOperationalDataset(mixedData, operationalAnalyticsConfig(mixedData.referenceDate, 30));
+    const mixed = buildAnalysisBrief(mixedData, mixedMetrics, "Por que esses materiais foram priorizados?");
+    expect(mixed.brief.summary).toContain("crítico precede baixo");
+    expect(mixed.brief.items.map((item) => item.sku)).toEqual(rankAnalyticSkus(mixedMetrics.skus, "priorities").map((item) => item.sku));
+  });
+  it("lead time distingue cobertura e risco sem reordenar por urgência", () => {
+    const dataset = buyingFixture([{ id: "DEMO-FLOW-0001", stock: 50 }, { id: "DEMO-FLOW-0002", stock: 2 }], { "compras.csv": [
+      syntheticOrder({ sku: "DEMO-FLOW-0001", po_id: "SYN-PENDING-A" }), syntheticOrder({ sku: "DEMO-FLOW-0002", po_id: "SYN-PENDING-B" }),
+    ] });
+    const analytics = analyzeOperationalDataset(dataset, operationalAnalyticsConfig(dataset.referenceDate, 30));
+    const before = structuredClone(analytics);
+    const { brief } = buildAnalysisBrief(dataset, analytics, "Analise lead time");
+    expect(brief.items.map((item) => item.sku)).toEqual(rankAnalyticSkus(analytics.skus, "lead_time").map((item) => item.sku));
+    expect(brief.items.map((item) => item.risk)).toEqual(["low", "critical"]);
+    expect(brief.summary).toContain("prazo elevado não significa necessariamente risco de ruptura");
+    expect(brief.items[0].reason).toContain("cobertura estimada supera o prazo médio");
+    expect(brief.items[1].reason).toContain("termina antes do prazo médio");
+    expect(brief.recommendations.find((step) => step.skuCodes.includes("DEMO-FLOW-0001"))!.text).toContain("evitar sobreposição");
+    expect(brief.recommendations.find((step) => step.skuCodes.includes("DEMO-FLOW-0002"))!.text).toContain("antes de a cobertura estimada terminar");
+    expect(analytics).toEqual(before);
+  });
+  it("explicação de prazo desconhecido não afirma uma comparação com zero", () => {
+    const { dataset, analytics } = metrics();
+    for (const metric of analytics.skus) { metric.leadTime.status = "insufficient"; metric.leadTime.meanDays = null; }
+    const { brief } = buildAnalysisBrief(dataset, analytics, "Explique o lead time");
+    expect(brief.items.length).toBeGreaterThan(0);
+    for (const item of brief.items) {
+      expect(item.leadTimeDays).toBeNull();
+      expect(item.reason).toContain("Sem comparação válida");
+      expect(item.reason).not.toContain("supera o prazo médio");
+    }
+  });
+  it("explica diferenças anteriores à formatação sem apresentar uma comparação numérica enganosa", () => {
+    const { dataset, analytics } = metrics();
+    analytics.skus = [row("DEMO-FLOW-0001", 1.24, 4.5), row("DEMO-FLOW-0002", 1.240001, 4.5)];
+    const { brief } = buildAnalysisBrief(dataset, analytics, "Por que esses materiais foram priorizados?");
+    expect(brief.summary).toContain("antes da formatação");
+    expect(brief.summary).not.toContain("3,3 dias frente a 3,3 dias");
+    expect(brief.items.map((item) => item.coverageDays)).toEqual([1.24, 1.240001]);
+  });
   it("calcula déficit fracionário sem arredondar ou alterar o risco do motor", () => {
     const metric = row(); const original = structuredClone(metric);
     expect(coverageDeficitDays(metric)).toBe(3.25);
