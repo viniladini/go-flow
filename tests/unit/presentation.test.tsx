@@ -142,6 +142,35 @@ describe("experiência de apresentação", () => {
       expect(dialog().open).toBe(false);
     } finally { stylesheet.remove(); }
   });
+  it.each([false, true])("primeira cena usa preto explicito e o mesmo glifo opaco, reduced motion %s", async (reduced) => {
+    reduce = reduced;
+    const stylesheet = document.createElement("style");
+    const globals = readFileSync(resolve("src/app/globals.css"), "utf8");
+    stylesheet.textContent = globals.slice(globals.indexOf(":root")) + readFileSync(resolve("src/app/signature-motion.css"), "utf8");
+    document.head.append(stylesheet);
+    try {
+      await mount(); await click("Conheça");
+      const skip = dialog().querySelector<HTMLButtonElement>(".presentation-skip")!;
+      const label = skip.querySelector<HTMLElement>(".presentation-skip-label")!;
+      const connector = dialog().querySelector(".signature-connector")!;
+      const check = () => {
+        expect(getComputedStyle(skip).color.toUpperCase()).toBe("#000");
+        expect(getComputedStyle(skip).borderTopColor.toUpperCase()).toBe("#000");
+        expect(getComputedStyle(skip).backgroundColor).toBe("transparent");
+        const style = getComputedStyle(label);
+        expect(style.backgroundImage).toContain("#000"); expect(style.backgroundClip).toBe("text");
+        expect(style.color).toBe("transparent"); expect(style.opacity).toBe("1");
+        expect(style.animation).toBe("none"); expect(style.transition).toBe("none");
+        expect(dialog().querySelector(".signature-connector")).toBe(connector);
+        expect(connector.querySelector("[data-connector-base]")!.getAttribute("fill")!.toUpperCase()).toBe("#101629");
+      };
+      check();
+      dialog().style.color = "white"; await tick(2000); check();
+      await click("Começar"); await click("Voltar"); check();
+      expect(dialog().querySelectorAll(".presentation-skip-label")).toHaveLength(1);
+      expect(skip.tabIndex).toBe(0);
+    } finally { stylesheet.remove(); }
+  });
   it.each([1200, 375])("skip reutiliza a mascara computada em cinco etapas, viewport %i", async (width) => {
     const stylesheet = document.createElement("style");
     stylesheet.textContent = readFileSync(resolve("src/app/globals.css"), "utf8").match(/:root\s*\{[^}]+\}/)![0] + readFileSync(resolve("src/app/signature-motion.css"), "utf8");
@@ -153,6 +182,9 @@ describe("experiência de apresentação", () => {
       return element.matches(".presentation-scene:not(.outgoing)") ? new Proxy(style, {
         get(target, key) {
           if (key === "clipPath") return clip;
+          // A legacy/inherited canvas color must not authorize white skip ink
+          // on chartreuse; the button reads its explicit scene token instead.
+          if (key === "color" && (element as HTMLElement).dataset.scene === "0") return "#FFFFFF";
           const value = Reflect.get(target, key, target);
           return typeof value === "function" ? value.bind(target) : value;
         },
@@ -169,11 +201,22 @@ describe("experiência de apresentação", () => {
       await mount(); await click("Conheça");
       const skip = dialog().querySelector<HTMLButtonElement>(".presentation-skip")!;
       const label = skip.querySelector<HTMLElement>(".presentation-skip-label")!;
+      skip.style.fontWeight = "400";
+      const connector = dialog().querySelector<SVGSVGElement>(".signature-connector")!;
+      const path = connector.querySelector("path")!, circle = connector.querySelector("circle")!;
+      const base = connector.querySelector("[data-connector-base]")!;
+      const reveal = connector.querySelector("[data-connector-reveal]")!;
+      const accent = reveal.querySelector<SVGRectElement>("rect")!;
+      const inverse = { a: 2, b: .1, c: -.2, d: 2, e: -100, f: -50 };
+      Object.defineProperty(connector, "getScreenCTM", { value: () => ({ inverse: () => inverse }) });
+      expect(getComputedStyle(dialog().querySelector(".cinematic-stage")!).zIndex).toBe("1");
+      expect(getComputedStyle(connector).zIndex).toBe("3");
       const paint = () => {
         const url = skip.style.getPropertyValue("--skip-reveal-paint");
         return new DOMParser().parseFromString(decodeURIComponent(url.slice('url("data:image/svg+xml,'.length, -2)), "image/svg+xml");
       };
-      const inks = ["#101629", "#FFFFFF", "#FFFFFF", "#101629", "#FFFFFF"];
+      const inks = ["#000", "#FFFFFF", "#FFFFFF", "#101629", "#FFFFFF"];
+      const accents = ["#101629", "#DCEB16", "#DCEB16", "#1761B1", "#DCEB16"];
       let previous = 0;
       for (const next of [1, 2, 3, 4, 3, 2, 1, 0]) {
         clip = "inset(0 0 100% 0)";
@@ -188,6 +231,7 @@ describe("experiência de apresentação", () => {
               ? [0, 25, 50, 75, 100].map(p => `circle(${p * 16}px at 900px 360px)`)
               : [0, 25, 50, 75, 100].map(p => next > previous ? `inset(0 0 ${100 - p}% 0)` : `inset(0 0 0 ${100 - p}%)`);
         for (const mask of masks) {
+          inverse.e -= 3; // Existing SVG motion can continue while the mask moves.
           clip = mask; await tick(16);
           const image = paint(), rects = image.querySelectorAll("rect");
           expect(image.querySelector("parsererror")).toBeNull();
@@ -195,15 +239,29 @@ describe("experiência de apresentação", () => {
           expect(rects[0].getAttribute("fill")!.toUpperCase()).toBe(inks[previous]);
           expect(rects[1].getAttribute("fill")!.toUpperCase()).toBe(inks[next]);
           expect(rects[1].getAttribute("style")).toBe(`clip-path:${mask}`);
+          expect(image.querySelector("[opacity], [fill-opacity], [mask], text")).toBeNull();
           expect(image.documentElement.getAttribute("width")).toBe("204");
           expect(image.querySelector("svg svg")!.getAttribute("x")).toBe(String(-buttonX + 2));
           expect(skip.style.getPropertyValue("--skip-label-position")).toBe("-23px -15px");
           expect(getComputedStyle(skip).backgroundColor).toBe("transparent");
           expect(getComputedStyle(label).color).toBe("transparent");
           expect(getComputedStyle(label).backgroundClip).toBe("text");
+          expect(getComputedStyle(label).opacity).toBe("1");
+          expect(getComputedStyle(skip).opacity).toBe("1");
+          expect(getComputedStyle(label).fontWeight).toBe("400");
+          expect(getComputedStyle(label).animation).toBe("none");
+          expect(getComputedStyle(label).transition).toBe("none");
           expect(label.textContent).toBe("Pular apresentação");
           expect(dialog().querySelectorAll(".presentation-skip-label")).toHaveLength(1);
           expect(getComputedStyle(label).transform).toBe("none");
+          expect(dialog().querySelectorAll(".signature-connector")).toHaveLength(1);
+          expect(connector.querySelector("path")).toBe(path); expect(connector.querySelector("circle")).toBe(circle);
+          expect(base.getAttribute("fill")!.toUpperCase()).toBe(accents[previous]);
+          expect(accent.getAttribute("fill")!.toUpperCase()).toBe(accents[next]);
+          expect(accent.style.clipPath).toBe(mask);
+          expect(reveal.getAttribute("visibility")).toBe("visible");
+          expect(reveal.getAttribute("transform")).toBe(`matrix(2 0.1 -0.2 2 ${inverse.e} -50)`);
+          expect(getComputedStyle(connector).opacity).toBe(".22");
         }
         const frozen = skip.style.getPropertyValue("--skip-reveal-paint");
         await tick(100); expect(skip.style.getPropertyValue("--skip-reveal-paint")).toBe(frozen);
@@ -211,12 +269,18 @@ describe("experiência de apresentação", () => {
         clip = "none"; await tick(16);
         expect(dialog().querySelector(".outgoing")).not.toBeNull();
         expect(skip.hasAttribute("data-revealing")).toBe(false);
+        expect(base.getAttribute("fill")!.toUpperCase()).toBe(accents[next]);
+        expect(reveal.getAttribute("visibility")).toBe("hidden");
         await tick(SCENE_TRANSITION_MS);
         expect(skip.hasAttribute("data-revealing")).toBe(false);
         expect(skip.style.getPropertyValue("--skip-reveal-paint")).toBe("");
         expect(getComputedStyle(skip).color.toUpperCase()).toBe(inks[next]);
         expect(getComputedStyle(skip).borderTopWidth).toBe("1px");
         expect(getComputedStyle(skip).backgroundColor).toBe("transparent");
+        // Same glyph compositing before/during/after; only its opaque ink changes.
+        expect(getComputedStyle(label).backgroundClip).toBe("text");
+        expect(getComputedStyle(label).color).toBe("transparent");
+        expect(getComputedStyle(label).opacity).toBe("1");
         previous = next;
       }
     } finally { stylesheet.remove(); }
@@ -248,7 +312,7 @@ describe("experiência de apresentação", () => {
       }
       await tick(IRIS_EXPANSION_MS);
       expect(skip.hasAttribute("data-revealing")).toBe(false);
-      expect(getComputedStyle(skip).color.toUpperCase()).toBe("#101629");
+      expect(getComputedStyle(skip).color.toUpperCase()).toBe("#000");
       expect(getComputedStyle(skip).borderTopWidth).toBe("1px");
     } finally { stylesheet.remove(); }
   });
@@ -267,12 +331,15 @@ describe("experiência de apresentação", () => {
     });
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 200, 44));
     const skip = dialog().querySelector<HTMLButtonElement>(".presentation-skip")!;
+    const connector = dialog().querySelector(".signature-connector")!, path = connector.querySelector("path")!;
     const frame = vi.spyOn(window, "requestAnimationFrame");
     const cancel = vi.spyOn(window, "cancelAnimationFrame");
     await act(async () => dialog().querySelector<HTMLButtonElement>(".scene-next")!.click());
     const first = frame.mock.results.at(-1)!.value;
     await act(async () => dialog().querySelector<HTMLButtonElement>(".scene-next")!.click());
     expect(cancel).toHaveBeenCalledWith(first);
+    expect(dialog().querySelector(".signature-connector")).toBe(connector);
+    expect(connector.querySelector("path")).toBe(path);
     expect(skip.hasAttribute("data-revealing")).toBe(true);
     await act(async () => skip.click());
     expect(dialog().dataset.mode).toBe("handoff"); expect(skip.hasAttribute("data-revealing")).toBe(false);

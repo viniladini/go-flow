@@ -6,7 +6,7 @@ import { ArrowLeft, ArrowRight, FileUp, Play, RotateCcw, Sparkles } from "lucide
 import { Brand } from "./brand";
 import { FlowOrb } from "./flow-orb";
 import { useImportSession } from "./import-session-provider";
-import { PRESENTATION_KEY, PRESENTATION_SCENES, PRESENTATION_PALETTE, presentationColors, SCENE_TRANSITION_MS, SPLASH_FRAME_MS, IRIS_EXPANSION_MS, WELCOME_OVERLAP_MS, WELCOME_ENTER_MS, LOGO_GO_MS, LOGO_FLOW_MS, LOGO_FLOW_DELAY_MS, viewportIris } from "@/lib/presentation";
+import { PRESENTATION_KEY, PRESENTATION_SCENES, PRESENTATION_PALETTE, PRESENTATION_COLORS, presentationColors, SCENE_TRANSITION_MS, SPLASH_FRAME_MS, IRIS_EXPANSION_MS, WELCOME_OVERLAP_MS, WELCOME_ENTER_MS, LOGO_GO_MS, LOGO_FLOW_MS, LOGO_FLOW_DELAY_MS, viewportIris } from "@/lib/presentation";
 
 const ReplayContext = createContext<(() => void) | null>(null);
 const prototypeNotice = "Protótipo independente · Gogroup";
@@ -121,24 +121,51 @@ export function Presentation({ children }: { children: ReactNode }) {
     const button = skipButton.current, root = dialog.current;
     const label = button?.querySelector<HTMLElement>(".presentation-skip-label");
     if (!button || !label || !root) return;
-    const clearPaint = () => {
+    const connector = root.querySelector<SVGSVGElement>(".signature-connector");
+    const base = connector?.querySelector<SVGRectElement>("[data-connector-base]");
+    const reveal = connector?.querySelector<SVGGElement>("[data-connector-reveal]");
+    const viewport = reveal?.querySelector<SVGSVGElement>("svg");
+    const accent = viewport?.querySelector<SVGRectElement>("rect");
+    const rootStyle = getComputedStyle(root);
+    const tokens = getComputedStyle(document.documentElement);
+    const sceneColor = (scene: HTMLElement, kind: "ink" | "accent") => {
+      const colors = PRESENTATION_COLORS[scene.dataset.palette as keyof typeof PRESENTATION_COLORS];
+      const token = kind === "ink" && scene.dataset.scene === "0" ? "presentation-skip-first-ink" : colors[kind];
+      return rootStyle.getPropertyValue(`--${token}`).trim() || tokens.getPropertyValue(`--${token}`).trim();
+    };
+    const clearPaint = (settledAccent?: string) => {
       delete button.dataset.revealing;
       for (const property of ["--skip-reveal-paint", "--skip-paint-size", "--skip-label-position"]) button.style.removeProperty(property);
+      if (settledAccent) base?.setAttribute("fill", settledAccent);
+      reveal?.setAttribute("visibility", "hidden");
     };
     const incoming = root.querySelector<HTMLElement>(".cinematic-stage > .presentation-scene:not(.outgoing)");
     const iris = revealing ? root.querySelector<HTMLElement>(".presentation-iris") : null;
     if ((!sceneNoticeVisible && !iris) || !incoming) { clearPaint(); button.style.removeProperty("--skip-ink"); return; }
-    const canvasStyle = getComputedStyle(incoming), targetInk = canvasStyle.color;
-    if (reduce || (!iris && (!canvasStyle.clipPath || canvasStyle.clipPath === "none"))) { clearPaint(); button.style.setProperty("--skip-ink", targetInk); return; }
+    const canvasStyle = getComputedStyle(incoming), targetInk = sceneColor(incoming, "ink"), targetAccent = sceneColor(incoming, "accent");
+    if (reduce || (!iris && (!canvasStyle.clipPath || canvasStyle.clipPath === "none"))) { clearPaint(targetAccent); button.style.setProperty("--skip-ink", targetInk); return; }
     const outgoing = root.querySelector<HTMLElement>(".cinematic-stage > .outgoing");
-    const sourceInk = outgoing ? getComputedStyle(outgoing).color : getComputedStyle(button).color;
+    const sourceInk = outgoing ? sceneColor(outgoing, "ink") : getComputedStyle(button).color;
+    const sourceAccent = outgoing ? sceneColor(outgoing, "accent") : base?.getAttribute("fill") || targetAccent;
     button.style.setProperty("--skip-ink", sourceInk);
     let frame: number | undefined;
     const followMask = () => {
       const canvas = incoming.getBoundingClientRect(), box = button.getBoundingClientRect(), text = label.getBoundingClientRect();
       const circle = iris?.getBoundingClientRect();
       const clip = circle ? `circle(${circle.width / 2}px at ${circle.left + circle.width / 2 - canvas.left}px ${circle.top + circle.height / 2 - canvas.top}px)` : getComputedStyle(incoming).clipPath;
-      if (!circle && (!clip || clip === "none")) { clearPaint(); button.style.setProperty("--skip-ink", targetInk); return; }
+      if (!circle && (!clip || clip === "none")) { clearPaint(targetAccent); button.style.setProperty("--skip-ink", targetInk); return; }
+      // One persistent path/circle, with opaque ink supplied by a paint server.
+      // Inverse CTM maps the real viewport mask into the moving SVG's space.
+      // The path's existing transform/opacity never restarts or changes owner.
+      const inverse = connector?.getScreenCTM?.()?.inverse();
+      if (inverse && base && reveal && viewport && accent && !iris) {
+        base.setAttribute("fill", sourceAccent);
+        accent.setAttribute("fill", targetAccent); accent.style.clipPath = clip || "none";
+        reveal.setAttribute("transform", `matrix(${inverse.a} ${inverse.b} ${inverse.c} ${inverse.d} ${inverse.e} ${inverse.f})`);
+        for (const [name, value] of Object.entries({ x: canvas.left, y: canvas.top, width: canvas.width, height: canvas.height })) viewport.setAttribute(name, String(value));
+        viewport.setAttribute("viewBox", `0 0 ${canvas.width} ${canvas.height}`);
+        reveal.setAttribute("visibility", "visible");
+      }
       if (box.width && box.height && canvas.width && canvas.height) {
         // Reuse the browser's interpolated mask verbatim, in the same viewport
         // coordinates. This tiny ink image contains NO text: one natural-size
@@ -341,7 +368,7 @@ export function Presentation({ children }: { children: ReactNode }) {
       <header className="presentation-header" data-chrome-anchor="header">{(screen.mode === "splash" && !revealing) || screen.splashExit ? <span className="splash-signature">gogroup</span> : <span className="scene-caption">{sceneCaptions[screen.scene]}</span>}<div className="presentation-header-right">{(screen.mode !== "splash" || revealing) && <ol className="scene-dots" aria-label="Progresso da apresentação">{PRESENTATION_SCENES.map((item, index) => <li key={item.title} aria-current={index === screen.scene ? "step" : undefined}><span className="sr-only">{index + 1}: {item.title}</span></li>)}</ol>}<button ref={skipButton} className="presentation-skip" onClick={skip}><span className="presentation-skip-label">{screen.mode === "handoff" ? "Voltar à aplicação" : "Pular apresentação"}</span></button></div></header>
       <p className="presentation-slogan" data-chrome-anchor="slogan" key={`${clone ? "handoff" : "dialog"}:slogan`}><span>From insight to action.</span></p>
       <div className="presentation-curves" aria-hidden="true"><svg viewBox="0 0 400 400" fill="none"><path d="M-30 340H90C240 340 120 80 300 80H430" /><path d="M-30 390H120C280 390 160 130 330 130H430" /><circle cx="300" cy="80" r="12" /></svg></div>
-      <svg className="signature-connector" viewBox="0 0 400 400" fill="none" aria-hidden="true"><path d="M-30 340H90C240 340 120 80 300 80H430" /><circle cx="300" cy="80" r="7" /></svg>
+      <svg className="signature-connector" viewBox="0 0 400 400" fill="none" aria-hidden="true"><defs><pattern id="goflow-connector-ink" patternUnits="userSpaceOnUse" width="400" height="400"><rect data-connector-base width="400" height="400" fill="var(--scene-accent)" /><g data-connector-reveal visibility="hidden"><svg><rect width="100%" height="100%" /></svg></g></pattern></defs><path d="M-30 340H90C240 340 120 80 300 80H430" /><circle cx="300" cy="80" r="7" /></svg>
       {screen.previous !== null && <div className="cinematic-surface" data-from={screen.previous} data-transition={screen.transition} key={`${clone ? "handoff" : "dialog"}:surface:${screen.transition}`} aria-hidden="true" />}
       {screen.mode === "splash" && screen.frame === 2 && <div className="presentation-iris" aria-hidden="true"><div className="iris-depth" /><svg className="iris-curves" viewBox="0 0 1000 1000" fill="none"><path d="M-80 700H240C650 700 340 200 900 200H1100" /><path d="M-80 760H260C720 760 370 260 940 260H1100" /></svg></div>}
       {screen.mode === "splash" || screen.returning || screen.splashExit ? <div className="presentation-splash" style={revealing ? screen.splashBox : undefined} inert={revealing || undefined} aria-label="go.flow — From insight to action.">
